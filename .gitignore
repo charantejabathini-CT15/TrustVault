@@ -1,0 +1,51 @@
+# Environment
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Test
+.coverage
+htmlcov/
+.pytest_cache/
+test-results/
+playwright-report/
+
+# MinIO data
+minio_data/
+
+# MySQL data
+mysql_data/
+
+# Local Database & Storage
+*.db
+*.sqlite
+*.sqlite3
+backend/trustvault.db
+backend/data/

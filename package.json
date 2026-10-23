@@ -1,0 +1,28 @@
+{
+  "name": "trustvault",
+  "version": "1.0.0",
+  "description": "TrustVault — Secure Document Sharing with Verifiable Audit Trail",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -p \"[{name}]\" -n \"BACKEND,FRONTEND\" -c \"yellow.bold,cyan.bold\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "powershell -ExecutionPolicy Bypass -Command \"cd backend; .\\venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload\"",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "test": "powershell -ExecutionPolicy Bypass -Command \"cd backend; .\\venv\\Scripts\\python.exe -m pytest\"",
+    "seed": "powershell -ExecutionPolicy Bypass -Command \"cd backend; .\\venv\\Scripts\\python.exe seed.py\"",
+    "start": "npm run dev"
+  },
+  "keywords": [
+    "zero-knowledge",
+    "security",
+    "encryption",
+    "fastapi",
+    "react",
+    "typescript"
+  ],
+  "author": "TrustVault",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

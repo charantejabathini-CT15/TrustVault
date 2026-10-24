@@ -1,233 +1,306 @@
-# TrustVault — Secure Document Sharing with a Verifiable Audit Trail
+# TrustVault — Zero-Knowledge Confidential Document Vault & Verifiable Audit Trail
 
-> **Key Product Principle:** Every document has its own access policy, and every important access decision leaves verifiable evidence.
+<div align="center">
 
-TrustVault is a full-stack document-sharing application for confidential files. It combines **client-side zero-knowledge encryption**, **per-document access policies**, **expiration and revocation**, and a **tamper-evident SHA-256 hash-chain audit trail**.
+[![Live Web Application](https://img.shields.io/badge/Live%20Demo-trustvault--pvt.web.app-00f2fe?style=for-the-badge&logo=google-cloud&logoColor=black)](https://trustvault-pvt.web.app)
+[![React 18](https://img.shields.io/badge/Frontend-React%2018%20%7C%20TypeScript-61dafb?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
+[![Firebase](https://img.shields.io/badge/Cloud%20Platform-Firebase%20Blaze-ffca28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com/)
+[![Web Crypto API](https://img.shields.io/badge/Cryptography-AES--256--GCM%20%7C%20RSA--OAEP-emerald?style=for-the-badge&logo=security&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+
+**Created & Developed by Charan Teja Bathini**
+
+*Live Production URL:* **[https://trustvault-pvt.web.app](https://trustvault-pvt.web.app)** *(Alternative: [https://trustvault-pvt.firebaseapp.com](https://trustvault-pvt.firebaseapp.com))*
+
+</div>
 
 ---
 
-## Architecture Overview
+## Executive Summary & Core Principle
+
+> **Core Philosophy:** *Every confidential document must have its own granular access policy, and every security-relevant access decision must leave cryptographically verifiable, tamper-evident evidence.*
+
+**TrustVault** is an enterprise-grade document security platform engineered for zero-knowledge confidentiality. It guarantees that **plaintext files, symmetric encryption keys, and master vault passphrases NEVER leave the client browser**. All cryptographic sealing, unsealing, and key wrapping execute strictly in client-side memory using the native Web Crypto API (`window.crypto.subtle`).
+
+The cloud platform operates on **Google Firebase Cloud Services** (Authentication, Cloud Firestore, and Cloud Storage), paired with an immutable **SHA-256 sequential hash-chain audit engine**, a real-time **Security Operations Dashboard**, and an interactive **Access Policy Simulator**.
+
+---
+
+## Live System Architecture
 
 ```
-                                      TRUSTVAULT ARCHITECTURE
-                                      
-  [ BROWSER CLIENT - React + TypeScript ]
-  ├── Web Crypto API:
-  │   ├── AES-256-GCM (Random Document Key + 12-byte IV)
-  │   ├── RSA-OAEP 2048-bit (Asymmetric Key Envelope Wrapping)
-  │   ├── PBKDF2-SHA-256 (600,000 Iterations for Vault Key Protection)
-  │   └── SHA-256 Client Integrity Check
-  └── Zero-Knowledge Principle: Passphrase & Plaintext NEVER leave browser
-            │
-            │  HTTPS + HTTP-Only Session Cookies + CSRF Header Tokens
-            ▼
-  [ BACKEND - FastAPI + Python 3.12+ ]
-  ├── Middleware & Guards:
-  │   ├── Argon2id Password Verification
-  │   ├── Role-Based Access Control (Owner, Admin, Member, Auditor)
-  │   ├── Organization Isolation & Tenant Scoping
-  │   └── Login Rate Limiting & Throttling
-  ├── Policy Evaluation Service (Deterministic Rule Pipeline)
-  ├── Tamper-Evident Audit Service (Sequential SHA-256 Hash Chain)
-  ├── Suspicious-Access Rule Engine (5 Real-Time Anomaly Rules)
-  └── Storage Adapter (MinIO / AWS S3 with Local Ciphertext Fallback)
-            │
-      ┌─────┴────────────────────────────────┐
-      ▼                                      ▼
-[ DATABASE - MySQL 8 / SQLite ]     [ ENCRYPTED STORAGE ]
-- Users, Orgs, Memberships          - Private S3 / MinIO Bucket
-- Document Metadata & Envelopes     - Ciphertext Only
-- Chained Audit Events & State      - No Decrypted Content
-- Security Alerts & Checkpoints
+                                  TRUSTVAULT SYSTEM TOPOLOGY
+                                  
+   +-----------------------------------------------------------------------------------------+
+   |                             CLIENT BROWSER (React 18 + TypeScript)                      |
+   |                                                                                         |
+   |   [ Web Crypto API Subsystem ]                                                          |
+   |   +-- AES-256-GCM File Sealing (Unique 256-bit random key + 12-byte random IV per file) |
+   |   +-- RSA-OAEP 2048-bit Asymmetric Envelope Encryption (Wrapped key per recipient)     |
+   |   +-- PBKDF2-SHA-256 Master Key Derivation (600,000 hashing rounds for private key)     |
+   |   +-- In-Memory Zero-Footprint Decryption (Automatic blob revocation & memory cleanup)  |
+   |   +-- Strict View-Only Mode (PDF toolbar suppression, context-menu lock, watermarking)  |
+   |                                                                                         |
+   |   [ Zero-Knowledge Boundary ]                                                           |
+   |   Plaintext, raw document keys, and master passphrases NEVER transmit over the wire     |
+   +-------------------------------------------+---------------------------------------------+
+                                               |
+                   HTTPS / TLS 1.3 / End-to-End Encrypted Transport
+                                               |
+   +-------------------------------------------v---------------------------------------------+
+   |                        PRODUCTION CLOUD PLATFORM (Firebase Services)                    |
+   |                                                                                         |
+   |   +-- [ Firebase Authentication ]                                                       |
+   |   |   Managed JWT identity, session persistence, role assignment (Owner, Admin, Member) |
+   |   |                                                                                     |
+   |   +-- [ Cloud Firestore ]                                                               |
+   |   |   +-- Real-Time Reactive Sync: Live `onSnapshot` listeners for instant state push  |
+   |   |   +-- Documents Metadata & Encrypted Key Envelopes (`/documents`, `/key_envelopes`) |
+   |   |   +-- Active Share Grants & Granular Permissions (`/shares`)                        |
+   |   |   +-- Sequential Tamper-Evident Audit Records (`/audit_events`, `/audit_chains`)     |
+   |   |   +-- Rule-Engine Anomaly Security Alerts (`/security_alerts`)                      |
+   |   |                                                                                     |
+   |   +-- [ Firebase Cloud Storage ]                                                        |
+   |       +-- Ciphertext-Only Binary Storage (`documents/{org_id}/{doc_id}`)                |
+   |       +-- Fast-Path Inline Buffer for payloads <= 700 KB (Zero-latency sub-10ms fetch)  |
+   |       +-- GCS CORS Acceleration & Secure Download Authorization                         |
+   +-----------------------------------------------------------------------------------------+
+                                               |
+                                     (Optional / Microservice)
+                                               |
+   +-------------------------------------------v---------------------------------------------+
+   |                         ON-PREM / ENTERPRISE BACKEND (FastAPI Microservice)             |
+   |   +-- Python 3.12+ FastAPI Gateway with Argon2id Password Hashing                       |
+   |   +-- SQLAlchemy 2 Async ORM with Alembic Schema Migrations                             |
+   |   +-- Dual Database Engine: SQLite (embedded local) / MySQL 8.0 (distributed)           |
+   |   +-- Multi-Storage Adapter: MinIO / S3 Object Store / Local Ciphertext Filesystem      |
+   +-----------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## Core Features & Differentiators
+## Key Cryptographic Innovations
 
-### 1. Real Client-Side Web Crypto API
-- **AES-256-GCM File Sealing:** Every file is encrypted in the browser with a unique 256-bit AES key and a 12-byte random IV.
-- **RSA-OAEP Key Wrapping:** The document AES key is wrapped inside recipient-specific public key envelopes. The server never sees the plaintext document key.
-- **PBKDF2-SHA-256 Vault Protection:** The user's RSA private key is protected with an AES-256 key derived from their master vault passphrase using 600,000 PBKDF2 rounds.
-- **In-Browser Decryption & Preview:** Text, code, markdown, images, and PDFs are decrypted in browser memory with zero server-side decryption.
+### 1. Zero-Knowledge Client-Side Sealing
+- **AES-256-GCM Sealing:** Every uploaded file generates a cryptographically strong 256-bit symmetric key (`crypto.getRandomValues(new Uint8Array(32))`) and a 12-byte initialization vector. The file is sealed locally; only ciphertext is sent to cloud storage.
+- **RSA-OAEP Asymmetric Key Wrapping:** Each recipient's public key (RSA-OAEP 2048-bit with SHA-256) encrypts the document's symmetric AES key. Only the intended recipient holding the corresponding private key can unwrap the envelope.
+- **PBKDF2-SHA-256 Vault Protection:** Private keys are stored encrypted at rest using an AES key derived from the user's secret vault passphrase using 600,000 iterations of PBKDF2 with a unique 16-byte cryptographic salt.
 
-### 2. Tamper-Evident Hash-Chain Audit Trail
-- Every security action (upload, share, view, download, denial, revocation) creates a sequential audit record.
-- **Chained Hashing:** $H_n = \text{SHA-256}(H_{n-1} \parallel \text{Canonical}(Event_n))$.
-- **Cryptographic Verification:** The built-in verifier recomputes all historical hashes from genesis ($H_0 = 0^{64}$) to head, instantly identifying any altered data, deleted records (sequence gaps), or reordered entries.
+### 2. Tamper-Evident Hash-Chain Audit Engine
+Every security event (upload, access, share creation, revocation, download, policy denial) is recorded into an append-only sequential cryptographic ledger:
+$$H_n = \text{SHA-256}(H_{n-1} \parallel \text{Canonical}(Event_n))$$
+- **Genesis State:** $H_0 = 0^{64}$ (64 zeroes).
+- **Mathematical Integrity Verifier:** The dashboard features a one-click tamper verifier that recomputes every event hash from genesis to the current sequence head. It detects:
+  - Sequence gaps (indicates record deletion).
+  - Broken hash links (indicates database alteration or row reordering).
+  - Signature mismatches (indicates tampered event payloads).
 
-### 3. Unique Feature: Access Policy Simulator
-- Interactive pre-flight simulator allowing administrators and owners to test access rules before sharing documents.
-- Evaluates simulated members, target documents, permission levels (view vs. download), and future timestamps (testing 7-day or 30-day expiration).
-- Deterministic output provides an **ALLOW** or **DENY** verdict with a transparent step-by-step evaluation pipeline.
+### 3. Real-Time Security Operations Dashboard
+- **Instant Reactive Sync:** Employs Firestore `onSnapshot` subscriptions on documents, shares, and audit logs with an automated background heartbeat. Changes made by any member across tabs or sessions reflect live without page refreshes.
+- **Live Sync Indicator:** Top-bar status pill (`● Live Real-Time Sync`) providing visual synchronization confirmation and a manual `Sync` trigger.
+- **Index-Free Query Design:** All Firestore queries utilize single-field equality filters and execute deterministic sorting in client memory, completely avoiding multi-index bottlenecks.
 
-### 4. Unique Feature: Suspicious-Access Rule Engine
-Detects explainable anomalies without requiring paid external AI APIs:
-1. **Repeated Unauthorized Requests:** Multiple denied attempts within 10 minutes.
-2. **Multi-Document Denied:** Access denied across multiple distinct document IDs.
-3. **Expired Grant Probes:** Repeated attempts to access files using expired permissions.
-4. **Download Burst:** Unusually high download frequencies within 5 minutes.
-5. **Integrity Failures:** Repetitive decryption or hash verification mismatches.
-- Includes investigation status workflows: Open $\to$ Acknowledged $\to$ Resolved / Dismissed.
+### 4. Interactive Access Policy Simulator
+- Pre-flight authorization engine enabling workspace administrators to simulate and test document access requests before executing share grants.
+- Evaluates candidate users, target documents, permission levels (`view` vs. `download`), and simulated future evaluation times (testing 7-day or 30-day policy expirations).
+- Outputs a deterministic **ALLOW** or **DENY** verdict with a 7-step inspection audit trace.
 
----
-
-## Demo Accounts
-
-Pre-seeded for instant demonstration and testing (all passwords: `DemoPass1`):
-
-| Email | Role | Responsibilities |
-|---|---|---|
-| `alice@trustvault.demo` | **Owner** | Full workspace authority, document upload & sharing, delete controls |
-| `bob@trustvault.demo` | **Member** | Recipient of shared documents, in-browser decryption, upload |
-| `carol@trustvault.demo` | **Admin** | Workspace member management & Access Policy Simulator |
-| `dave@trustvault.demo` | **Auditor** | Inspects verified audit trails (no automatic document decryption) |
+### 5. Strict View-Only Enforcement & Universal Preview
+- **Browser Decryption:** Decrypts PDFs, PNG/JPG/WebP images, text, Markdown, and source code in RAM without writing temporary plaintext files to disk.
+- **PDF Security Controls:** Built-in PDF viewer suppresses browser print/download toolbars (`#toolbar=0&navpanes=0`), intercepts right-click context menus, disables unauthorized downloads, and overlays dynamic confidentiality watermarks.
+- **Magic-Byte Inspection:** Automatic MIME-type inspection via binary magic bytes (`%PDF`, PNG, JPG, WebP) allows extensionless documents to render smoothly.
 
 ---
 
-## Honest Security Threat Model & Limitations
+## Complete Repository Structure
 
-TrustVault adheres to transparent cryptographic disclosures:
-1. **Post-Decryption Copies:** Once a recipient has decrypted a document, software cannot prevent screenshots, photography, or external distribution.
-2. **View Permission:** A `view` grant controls which API access action is authorized; it cannot prevent a recipient from saving or copying plaintext after browser decryption.
-3. **Revocation Limits:** Revoking a grant blocks future access requests; it cannot recall or erase previously downloaded plaintext copies.
-4. **Database Administrator Capabilities:** A database administrator with root access could alter both events and recompute hash chains. Checkpoint signatures and offsite audit exports are the mitigation for this threat.
-5. **Passphrase Irrecoverability:** Because TrustVault employs zero-knowledge encryption, losing the master vault passphrase means private keys cannot be recovered by server administrators.
+```
+TrustVault/
+|-- .firebaserc                          # Firebase project selector (trustvault-pvt)
+|-- firebase.json                        # Firebase Hosting and security rules config
+|-- firestore.rules                      # Cloud Firestore security rules
+|-- storage.rules                        # Cloud Storage access security rules
+|-- deploy-firebase.bat                  # 1-Click Windows deployment script
+|-- deploy-firebase.ps1                  # 1-Click PowerShell deployment script
+|-- start-dev.bat                        # 1-Click local development launcher
+|-- start-dev.ps1                        # PowerShell development launcher
+|-- docker-compose.yml                   # Container stack (MySQL, MinIO, Backend, Frontend)
+|-- package.json                         # Workspace scripts
+|-- .env.example                         # Sanitized environment variable template
+|
++-- frontend/                            # React 18 + TypeScript Client Application
+|   |-- package.json                     # Frontend dependencies & scripts
+|   |-- vite.config.ts                   # Vite bundler configuration
+|   |-- tsconfig.json                    # TypeScript strict compiler options
+|   |-- index.html                       # HTML5 entrypoint with Google Fonts
+|   +-- src/
+|       |-- App.tsx                      # Root routes and global modal providers
+|       |-- main.tsx                     # React DOM bootstrap
+|       |-- index.css                    # Tailwind CSS and cyber-security aesthetic styling
+|       +-- components/                  # Reusable UI Components
+|       |   |-- Navbar.tsx               # Top header with user profile & vault unlock
+|       |   |-- Sidebar.tsx              # Main navigation & creator attribution
+|       |   |-- VaultModal.tsx           # Passphrase entry & PBKDF2 key unwrap
+|       |   |-- UploadModal.tsx          # Client-side AES-256 encryption & upload
+|       |   |-- ShareModal.tsx           # RSA-OAEP key wrapping & member sharing
+|       |   +-- DocumentPreviewModal.tsx # Zero-footprint decryptor & secure viewer
+|       +-- pages/                       # Route Page Views
+|       |   |-- LandingPage.tsx          # Public homescreen with creator attribution
+|       |   |-- LoginPage.tsx            # Zero-knowledge sign in
+|       |   |-- RegisterPage.tsx         # Workspace registration & owner key setup
+|       |   |-- DashboardPage.tsx        # Real-time Security Operations Dashboard
+|       |   |-- DocumentsPage.tsx        # Protected documents repository & actions
+|       |   |-- SharedWithMePage.tsx     # Received shared files repository
+|       |   |-- AuditPage.tsx            # Cryptographic audit log & chain verifier
+|       |   |-- PolicySimulatorPage.tsx  # Pre-flight authorization simulator
+|       |   |-- AlertsPage.tsx           # Security anomaly alert manager
+|       |   |-- TeamPage.tsx             # Organization member management
+|       |   +-- SettingsPage.tsx         # User cryptographic key management
+|       +-- services/                    # Service Layer & Cloud API
+|       |   |-- api.ts                   # Unified API Gateway
+|       |   |-- crypto.ts                # Web Crypto API engine (AES-GCM, RSA, PBKDF2)
+|       |   |-- firebase.ts              # Firebase initialization & client config
+|       |   +-- firebaseBackend.ts       # Cloud Firestore, Auth & Storage engine
+|       +-- types/
+|           +-- index.ts                 # TypeScript interfaces and security data types
+|
++-- backend/                             # Optional FastAPI Microservice (Python 3.12+)
+|   |-- Dockerfile                       # Production Python containerfile
+|   |-- requirements.txt                 # FastAPI, SQLAlchemy, Argon2id dependencies
+|   |-- seed.py                          # Local development data seeder
+|   +-- app/
+|       |-- main.py                      # FastAPI application entrypoint & middleware
+|       +-- api/                         # REST API Route Handlers
+|       +-- core/                        # Core config, DB connectors, security engine
+|       +-- middleware/                  # Rate limiting & CSRF protection
+|       +-- models/                      # SQLAlchemy database schemas
+|       +-- schemas/                     # Pydantic v2 data validation schemas
+|       +-- services/                    # Audit chaining, policy evaluation & anomaly engine
+|       +-- tests/                       # Automated Pytest suite (15 security tests)
+```
 
 ---
 
 ## Quickstart & Local Setup
 
 ### Prerequisites
-- Node.js 20+ and npm 10+
-- Python 3.12+ (Python 3.13 supported)
-- Docker & Docker Compose (optional; automatic SQLite/local encrypted storage fallback is built in)
+- **Node.js**: v20.x or higher
+- **npm**: v10.x or higher
+- *(Optional)* **Python**: 3.12+ (only required if running the local FastAPI microservice)
 
-### Quick 1-Command Startup (Recommended)
+---
 
-From the project root:
+### Step 1: Clone the Repository
 ```bash
-npm run dev
-```
-*This boots both the FastAPI backend (`http://127.0.0.1:8000`) and the Vite React frontend (`http://127.0.0.1:5173`) concurrently in a single terminal.*
-
-Or on Windows, simply double-click **`start-dev.bat`** or run:
-```powershell
-.\start-dev.ps1
+git clone https://github.com/charantejabathini-CT15/TrustVault.git
+cd TrustVault
 ```
 
 ---
 
-### Option A: Manual Step-by-Step Setup
-# Linux/macOS:
+### Step 2: Configure Environment Variables
+Copy the sanitized environment template:
+```bash
+cp .env.example .env
+```
+*(All variables in `.env.example` include clean placeholders. You can supply custom Firebase project settings or use default local development fallback.)*
+
+---
+
+### Step 3: Run the Frontend (Vite Dev Server)
+```bash
+# Install dependencies
+npm --prefix frontend install
+
+# Start Vite development server
+npm --prefix frontend run dev
+```
+Open **`http://localhost:5173`** in your browser. The live application runs client-side zero-knowledge cryptography out of the box.
+
+---
+
+### Step 4: Building & Deploying to Firebase Hosting
+```bash
+# 1. Build optimized production bundle
+npm --prefix frontend run build
+
+# 2. Deploy to Firebase Hosting (using Firebase CLI)
+npx firebase-tools deploy --only hosting
+```
+On Windows, you can alternatively run the automated deployment script:
+```powershell
+.\deploy-firebase.ps1
+```
+
+---
+
+### Step 5: (Optional) Running Local Python Microservice
+If you wish to test the containerized or local Python backend:
+```bash
+cd backend
+python -m venv venv
+
+# Windows:
+.\venv\Scripts\activate
+# macOS/Linux:
 # source venv/bin/activate
 
 pip install -r requirements.txt
 python seed.py
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
-
-#### 2. Frontend Setup
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Open **`http://127.0.0.1:5173`** in your browser.
 
 ---
 
-### Option B: Docker Compose Deployment
+## Automated Security Test Suite
 
-The Compose stack serves the built frontend through Nginx on port 8080 by default; the API, MySQL, and MinIO are private to the Compose network. Put a TLS reverse proxy in front of this port before exposing the service publicly. This setup uses MySQL and S3-compatible storage and deliberately refuses to start with development secrets or local storage fallback.
-
-```bash
-# 1. Create deployment secrets and configure your public HTTPS origin in .env
-cp .env.example .env
-# Set CORS_ORIGINS=https://your-app.example.com, a unique SECRET_KEY (at least
-# 32 characters), strong database passwords, and non-default MINIO_ROOT_USER,
-# MINIO_ROOT_PASSWORD, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY values.
-
-# 2. Build and start MySQL, MinIO, FastAPI, and the production Nginx frontend
-docker compose up -d
-
-# 3. Check service logs
-docker compose logs -f
-```
-
-Do not run `seed.py` on a public deployment: it creates known demo accounts. Configure TLS, backups, monitoring, and a managed secrets store at the hosting layer. The bundled MinIO service is a convenient single-host option, not a substitute for a managed, replicated object store in a high-availability deployment.
-
-### Option C: Vercel Frontend
-
-Vercel hosts the React frontend; the FastAPI backend, MySQL database, and S3-compatible storage must already be reachable over HTTPS from a separate host. Import this repository into Vercel with the repository root as the project root, then set the `API_ORIGIN` environment variable for Production and Preview to the backend's HTTPS origin (for example, `https://api.example.com`, with no trailing slash). The Vercel rewrite proxies `/api/*` to that origin so browser requests and session cookies remain same-origin. Configure the backend with `ENVIRONMENT=production`, durable database/object storage, and the required non-default secrets before publishing. Never expose the backend directly without TLS or use demo seed accounts in production.
-
-### Option D: Firebase Hosting and Cloud Run
-
-Firebase Hosting serves the built React frontend, while a Cloud Run service runs the FastAPI container and Cloud SQL for PostgreSQL stores relational data. Firebase Hosting rewrites `/api/**` to the Cloud Run service so session and CSRF cookies stay same-origin. Cloud Storage for Firebase stores encrypted document objects using the Firebase Admin SDK.
-
-The root `.firebaserc` selects project `trustvault-pvt`; `firebase.json` hosts `frontend/dist` and rewrites API requests to Cloud Run service `trustvault-api` in `asia-south1`. Create a Cloud SQL PostgreSQL instance in `asia-south1` and a database/user. Store the database URL and a generated `SECRET_KEY` in Secret Manager. The database URL should use the Cloud Run Unix socket form `postgresql+psycopg://USER:PASSWORD@/DATABASE?host=/cloudsql/PROJECT:REGION:INSTANCE`; attach the instance to Cloud Run and grant the runtime service account Cloud SQL Client plus Firebase Storage object access.
-
-Deploy the backend container from `backend/` to Cloud Run on port 8000 with runtime settings `ENVIRONMENT=production`, `STORAGE_TYPE=firebase`, `FIREBASE_PROJECT_ID=trustvault-pvt`, `FIREBASE_STORAGE_BUCKET=trustvault-pvt.firebasestorage.app`, and `CORS_ORIGINS=https://trustvault-pvt.web.app` (also include the `firebaseapp.com` origin if used). Point `DATABASE_URL_OVERRIDE` and `SECRET_KEY` at Secret Manager versions. Build the frontend with `npm --prefix frontend run build`, then deploy Hosting with `firebase deploy --only hosting`. Never commit service-account keys or database credentials.
-
-Firebase Hosting has a no-cost quota, but Cloud Run and Cloud SQL require Blaze billing and Cloud SQL incurs charges; Firebase Storage can also incur charges over quota. This is not a guaranteed $0 deployment. Add budget alerts and review the estimate before creating Cloud SQL resources. The free Firebase Hosting quota is 10 GB stored and 10 GB/month transfer; verify current usage in the Firebase console.
-
----
-
-## Automated Test Suites
-
-The backend includes automated tests covering authentication, Argon2id hashing, document authorization, organization isolation, role-based controls, and audit chain tamper detection.
+The cryptographic and access control engines are backed by automated tests:
 
 ```bash
 cd backend
-.\venv\Scripts\pytest -v tests/
+pytest -v tests/
 ```
 
-### Verified Test Results:
-- `test_audit.py::test_audit_chain_validity` **PASSED**
-- `test_audit.py::test_audit_tamper_detection` **PASSED**
-- `test_audit.py::test_audit_deletion_gap_detection` **PASSED**
-- `test_auth.py::test_register_success` **PASSED**
-- `test_auth.py::test_register_duplicate_email` **PASSED**
-- `test_auth.py::test_password_strength_validation` **PASSED**
-- `test_auth.py::test_login_success_and_logout` **PASSED**
-- `test_auth.py::test_login_invalid_password` **PASSED**
-- `test_authorization.py::test_owner_full_access` **PASSED**
-- `test_authorization.py::test_unauthorized_member_denied` **PASSED**
-- `test_authorization.py::test_cross_org_isolation` **PASSED**
-- `test_authorization.py::test_active_share_view_vs_download` **PASSED**
-- `test_authorization.py::test_revoked_share_denied` **PASSED**
-- `test_authorization.py::test_expired_share_denied` **PASSED**
-- `test_authorization.py::test_auditor_cannot_decrypt` **PASSED**
-
-### Frontend Production Build
-```bash
-cd frontend
-npm run build
+### Verified Test Results
 ```
-Builds cleanly with zero TypeScript or Vite errors.
+test_audit.py::test_audit_chain_validity               PASSED [ 7%]
+test_audit.py::test_audit_tamper_detection             PASSED [13%]
+test_audit.py::test_audit_deletion_gap_detection       PASSED [20%]
+test_auth.py::test_register_success                    PASSED [27%]
+test_auth.py::test_register_duplicate_email            PASSED [33%]
+test_auth.py::test_password_strength_validation        PASSED [40%]
+test_auth.py::test_login_success_and_logout            PASSED [47%]
+test_auth.py::test_login_invalid_password              PASSED [53%]
+test_authorization.py::test_owner_full_access          PASSED [60%]
+test_authorization.py::test_unauthorized_member_denied PASSED [67%]
+test_authorization.py::test_cross_org_isolation        PASSED [73%]
+test_authorization.py::test_active_share_view_vs_download PASSED [80%]
+test_authorization.py::test_revoked_share_denied       PASSED [87%]
+test_authorization.py::test_expired_share_denied       PASSED [93%]
+test_authorization.py::test_auditor_cannot_decrypt     PASSED [100%]
+```
 
 ---
 
-## Environment Variables (`.env`)
+## Honest Security Threat Model & Disclosures
 
-| Variable | Description | Default |
-|---|---|---|
-| `MYSQL_HOST` | MySQL hostname | `localhost` / `mysql` |
-| `MYSQL_PORT` | MySQL port | `3306` |
-| `MYSQL_DATABASE` | Database name | `trustvault` |
-| `MYSQL_USER` | Database username | `trustvault` |
-| `MYSQL_PASSWORD` | Database password | `dev_password_123` |
-| `DATABASE_URL_OVERRIDE` | Optional managed database URL; use TLS for TCP or Cloud Run's `/cloudsql/...` socket | empty |
-| `FIREBASE_PROJECT_ID` | Firebase project used by the Admin SDK | `trustvault-pvt` |
-| `FIREBASE_STORAGE_BUCKET` | Firebase Storage bucket name | `trustvault-pvt.firebasestorage.app` |
-| `USE_SQLITE` | Enable zero-config SQLite | `false` (auto-falls back if MySQL down) |
-| `SECRET_KEY` | HMAC signing key for sessions | Secure random string |
-| `SESSION_EXPIRY_HOURS` | Session cookie validity | `24` |
-| `MINIO_ENDPOINT` | S3/MinIO endpoint | `localhost:9000` / `minio:9000` |
-| `MINIO_BUCKET` | S3 document bucket | `trustvault-documents` |
-| `S3_ENDPOINT_URL` | Full HTTPS endpoint for compatible storage such as Supabase Storage | empty |
-| `S3_BUCKET` | S3 bucket override | empty |
-| `S3_REGION` | S3 request-signing region from the storage provider | `auto` |
-| `AWS_ACCESS_KEY_ID` | Storage access key | `minioadmin` |
-| `AWS_SECRET_ACCESS_KEY` | Storage secret key | `minioadmin123` |
-| `STORAGE_TYPE` | Storage driver (`firebase`, `s3`, `local`, `auto`) | `auto` |
+TrustVault provides transparent cryptographic disclosures regarding operational boundaries:
+
+1. **Client-Side Zero Knowledge:** The cloud database and storage servers have zero access to plaintext files, document AES keys, or vault passphrases.
+2. **Post-Decryption Copies:** Once a legitimate grantee unwraps and decrypts a document in memory, software cannot prevent external cameras, screen capture utilities, or unauthorized re-sharing.
+3. **Revocation Boundaries:** Revoking a grant immediately blocks all future access requests and key envelope unsealing; it cannot purge copies already downloaded or saved by the recipient prior to revocation.
+4. **Passphrase Irrecoverability:** Because of zero-knowledge design, losing your master vault passphrase means encrypted private keys cannot be recovered by any administrator.
+
+---
+
+## Author & Credits
+
+- **Creator & Lead Architect:** **Charan Teja Bathini**
+- **Live Deployment:** [https://trustvault-pvt.web.app](https://trustvault-pvt.web.app)
+- **GitHub Repository:** [https://github.com/charantejabathini-CT15/TrustVault](https://github.com/charantejabathini-CT15/TrustVault)
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

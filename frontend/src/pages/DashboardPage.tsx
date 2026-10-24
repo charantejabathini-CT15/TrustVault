@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { dashboardApi, auditApi, documentsApi, alertsApi } from '../services/api';
+import { db } from '../services/firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import type { DashboardStats, AuditEventItem, DocumentItem, SecurityAlertItem } from '../types';
 import {
   FileText,
@@ -32,30 +34,117 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenUpload, onOp
   const [verifying, setVerifying] = useState(false);
   const [verificationMsg, setVerificationMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
 
-  const loadDashboard = async () => {
-    setLoading(true);
+  const loadDashboard = async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     try {
-      const [statsData, auditData, docsData, alertsData] = await Promise.all([
+      const results = await Promise.allSettled([
         dashboardApi.getStats(),
         auditApi.list({ limit: 5 }),
         documentsApi.list(),
         alertsApi.list({ status: 'open' }),
       ]);
-      setStats(statsData);
-      setRecentEvents(auditData?.events || []);
-      setRecentDocs((docsData?.documents || []).slice(0, 5));
-      setAlerts((alertsData?.alerts || []).slice(0, 3));
+
+      let loadedDocs: DocumentItem[] = [];
+
+      if (results[0].status === 'fulfilled') {
+        setStats(results[0].value);
+      }
+      if (results[1].status === 'fulfilled') {
+        setRecentEvents(results[1].value?.events || []);
+      }
+      if (results[2].status === 'fulfilled') {
+        loadedDocs = results[2].value?.documents || [];
+        setRecentDocs(loadedDocs.slice(0, 5));
+      }
+      if (results[3].status === 'fulfilled') {
+        setAlerts((results[3].value?.alerts || []).slice(0, 3));
+      }
+
+      // Sync document counts if loaded
+      if (loadedDocs.length > 0) {
+        setStats((prev) => ({
+          active_shares: prev?.active_shares ?? 0,
+          open_alerts: prev?.open_alerts ?? 0,
+          total_audit_events: prev?.total_audit_events ?? 0,
+          chain_verified: prev?.chain_verified ?? true,
+          ...prev,
+          total_documents: Math.max(prev?.total_documents ?? 0, loadedDocs.length),
+        }));
+      }
+
+      setLastSyncTime(new Date());
     } catch (err) {
       console.error('Failed to load dashboard data', err);
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadDashboard();
-  }, []);
+    // Initial fetch
+    loadDashboard(false);
+
+    if (!user) return;
+    const orgId = user.org_id || 'default_org';
+
+    // 1. Live real-time listener on documents
+    let unsubDocs = () => {};
+    try {
+      const qDocs = query(collection(db, 'documents'), where('org_id', '==', orgId));
+      unsubDocs = onSnapshot(
+        qDocs,
+        () => {
+          loadDashboard(true);
+        },
+        (e) => console.warn('Real-time docs listener notice:', e)
+      );
+    } catch (e) {
+      console.warn('Could not attach documents snapshot listener:', e);
+    }
+
+    // 2. Live real-time listener on audit events
+    let unsubAudit = () => {};
+    try {
+      const qAudit = query(collection(db, 'audit_events'), where('org_id', '==', orgId));
+      unsubAudit = onSnapshot(
+        qAudit,
+        () => {
+          loadDashboard(true);
+        },
+        (e) => console.warn('Real-time audit listener notice:', e)
+      );
+    } catch (e) {
+      console.warn('Could not attach audit snapshot listener:', e);
+    }
+
+    // 3. Live real-time listener on shares
+    let unsubShares = () => {};
+    try {
+      unsubShares = onSnapshot(
+        collection(db, 'shares'),
+        () => {
+          loadDashboard(true);
+        },
+        (e) => console.warn('Real-time shares listener notice:', e)
+      );
+    } catch (e) {
+      console.warn('Could not attach shares snapshot listener:', e);
+    }
+
+    // 4. Fallback interval every 4 seconds to guarantee live updates
+    const interval = setInterval(() => {
+      loadDashboard(true);
+    }, 4000);
+
+    return () => {
+      unsubDocs();
+      unsubAudit();
+      unsubShares();
+      clearInterval(interval);
+    };
+  }, [user?.org_id, user?.id]);
 
   const handleVerifyChain = async () => {
     setVerifying(true);
@@ -63,7 +152,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenUpload, onOp
     try {
       const res = await auditApi.verify();
       setVerificationMsg(res.message);
-      loadDashboard();
+      loadDashboard(true);
     } catch (err: any) {
       setVerificationMsg(err?.response?.data?.detail || 'Verification error');
     } finally {
@@ -76,16 +165,36 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenUpload, onOp
       {/* Welcome & Security Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 rounded-2xl bg-gradient-to-r from-[#0d1322] via-[#111a2e] to-[#0a1020] border border-[#1e2c4a]">
         <div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
-            Security Operations Dashboard
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
+              Security Operations Dashboard
+            </h1>
+            <div className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-semibold">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span>Live Real-Time Sync</span>
+            </div>
+          </div>
           <p className="text-xs text-slate-400 mt-1">
             Organization: <span className="text-cyan-400 font-semibold">{user?.org_name}</span> • Role:{' '}
-            <span className="capitalize text-slate-300 font-medium">{user?.role}</span>
+            <span className="capitalize text-slate-300 font-medium">{user?.role}</span> • Last synced:{' '}
+            <span className="text-slate-300 font-mono">{lastSyncTime.toLocaleTimeString()}</span>
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={() => loadDashboard(false)}
+            disabled={loading}
+            title="Refresh Dashboard Data"
+            className="px-3 py-2 rounded-xl bg-[#111a2e] hover:bg-[#1e2c4a] text-slate-300 hover:text-white border border-[#1e2c4a] text-xs font-semibold flex items-center gap-1.5 transition-colors"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-cyan-400' : ''}`} />
+            <span>Sync</span>
+          </button>
+
           {!isVaultUnlocked && (
             <button
               onClick={onOpenVault}
@@ -298,6 +407,20 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenUpload, onOp
           </div>
         </div>
       </div>
+
+      {/* Bottom Attribution Footer */}
+      <footer className="pt-6 pb-2 border-t border-[#1e2c4a]/80 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-3">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span className="text-slate-400">Zero-Knowledge Cryptographic Vault • Real-Time Security Operations</span>
+        </div>
+        <div className="text-slate-400 font-medium flex items-center gap-1.5 text-xs">
+          <span>Created by</span>
+          <span className="text-cyan-400 font-bold tracking-wide hover:text-cyan-300 transition-colors">
+            Charan Teja Bathini
+          </span>
+        </div>
+      </footer>
     </div>
   );
 };

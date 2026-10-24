@@ -89,6 +89,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenUpload, openAlertsCount 
           Keys wrapped via RSA-OAEP 2048 & files sealed with AES-256-GCM.
         </p>
       </div>
+
+      {/* Creator Attribution */}
+      <div className="pt-1 text-center text-[11px] text-slate-500">
+        Created by <span className="text-cyan-400 font-semibold">Charan Teja Bathini</span>
+      </div>
     </aside>
   );
 };

@@ -585,8 +585,7 @@ export const firebaseDocumentsApi = {
 
     let q = query(
       collection(db, 'documents'),
-      where('org_id', '==', orgId),
-      where('deleted', '==', false)
+      where('org_id', '==', orgId)
     );
 
     const snapshot = await getDocs(q);
@@ -595,14 +594,15 @@ export const firebaseDocumentsApi = {
     // Also get active shares for current user
     const sharesQuery = query(
       collection(db, 'shares'),
-      where('grantee_id', '==', user.id),
-      where('revoked', '==', false)
+      where('grantee_id', '==', user.id)
     );
     const sharesSnap = await getDocs(sharesQuery);
     const shareMap = new Map<string, ShareItem>();
     sharesSnap.forEach(s => {
       const sData = s.data() as ShareItem;
-      shareMap.set(sData.document_id, sData);
+      if (!sData.revoked) {
+        shareMap.set(sData.document_id, sData);
+      }
     });
 
     snapshot.forEach(d => {
@@ -671,13 +671,14 @@ export const firebaseDocumentsApi = {
     // Fetch user's envelope
     const envQ = query(
       collection(db, 'key_envelopes'),
-      where('document_id', '==', id),
-      where('user_id', '==', user.id)
+      where('document_id', '==', id)
     );
     const envSnap = await getDocs(envQ);
     let keyEnvelope: string | undefined;
     envSnap.forEach(e => {
-      keyEnvelope = e.data().encrypted_key;
+      if (e.data().user_id === user.id) {
+        keyEnvelope = e.data().encrypted_key;
+      }
     });
 
     const userShare = shares.find(s => s.grantee_id === user.id && !s.revoked);
@@ -711,15 +712,15 @@ export const firebaseDocumentsApi = {
     if (!isOwner) {
       const sharesQ = query(
         collection(db, 'shares'),
-        where('document_id', '==', id),
-        where('grantee_id', '==', user.id),
-        where('revoked', '==', false)
+        where('document_id', '==', id)
       );
       const sharesSnap = await getDocs(sharesQ);
       let allowed = false;
 
       sharesSnap.forEach(s => {
         const sData = s.data();
+        if (sData.grantee_id !== user.id) return;
+        if (sData.revoked) return;
         if (sData.expires_at && new Date(sData.expires_at).getTime() < Date.now()) {
           return;
         }
@@ -747,13 +748,14 @@ export const firebaseDocumentsApi = {
     // Retrieve user's key envelope
     const envQ = query(
       collection(db, 'key_envelopes'),
-      where('document_id', '==', id),
-      where('user_id', '==', user.id)
+      where('document_id', '==', id)
     );
     const envSnap = await getDocs(envQ);
     let encryptedKey: string | null = null;
     envSnap.forEach(e => {
-      encryptedKey = e.data().encrypted_key;
+      if (e.data().user_id === user.id) {
+        encryptedKey = e.data().encrypted_key;
+      }
     });
 
     if (!encryptedKey) {
@@ -939,37 +941,57 @@ export const firebaseAuditApi = {
     const user = cachedUser || (await firebaseAuthApi.me());
     const orgId = user.org_id || 'default_org';
 
-    const eventsQ = query(
-      collection(db, 'audit_events'),
-      where('org_id', '==', orgId),
-      orderBy('sequence_number', 'desc'),
-      firestoreLimit(params?.limit || 100)
-    );
+    try {
+      const eventsQ = query(
+        collection(db, 'audit_events'),
+        where('org_id', '==', orgId)
+      );
 
-    const snapshot = await getDocs(eventsQ);
-    const events: AuditEventItem[] = [];
+      const snapshot = await getDocs(eventsQ);
+      let events: AuditEventItem[] = [];
 
-    snapshot.forEach(d => {
-      events.push(d.data() as AuditEventItem);
-    });
+      snapshot.forEach(d => {
+        events.push(d.data() as AuditEventItem);
+      });
 
-    return { events, total: events.length };
+      // Filter in memory if params provided
+      if (params?.actor_id) events = events.filter(e => e.actor_id === params.actor_id);
+      if (params?.document_id) events = events.filter(e => e.document_id === params.document_id);
+      if (params?.action) events = events.filter(e => e.action === params.action);
+      if (params?.result) events = events.filter(e => e.result === params.result);
+
+      // Sort in-memory by sequence_number descending (no composite index needed!)
+      events.sort((a, b) => (b.sequence_number || 0) - (a.sequence_number || 0));
+
+      const total = events.length;
+      const offset = params?.offset || 0;
+      const limit = params?.limit || events.length;
+      events = events.slice(offset, offset + limit);
+
+      return { events, total };
+    } catch (err) {
+      console.error('Audit list error:', err);
+      return { events: [], total: 0 };
+    }
   },
 
   verify: async (): Promise<AuditVerificationResult> => {
     const user = cachedUser || (await firebaseAuthApi.me());
     const orgId = user.org_id || 'default_org';
 
-    // Retrieve all events ordered sequentially
-    const q = query(
-      collection(db, 'audit_events'),
-      where('org_id', '==', orgId),
-      orderBy('sequence_number', 'asc')
-    );
+    try {
+      // Retrieve all events for this org and sort sequentially in memory
+      const q = query(
+        collection(db, 'audit_events'),
+        where('org_id', '==', orgId)
+      );
 
-    const snapshot = await getDocs(q);
-    const events: AuditEventItem[] = [];
-    snapshot.forEach(d => events.push(d.data() as AuditEventItem));
+      const snapshot = await getDocs(q);
+      const events: AuditEventItem[] = [];
+      snapshot.forEach(d => events.push(d.data() as AuditEventItem));
+
+      // Sequential sort in memory (no composite index needed!)
+      events.sort((a, b) => (a.sequence_number || 0) - (b.sequence_number || 0));
 
     if (events.length === 0) {
       return {
@@ -1026,6 +1048,14 @@ export const firebaseAuditApi = {
       events_checked: events.length,
       message: `Audit chain verified successfully! All ${events.length} sequential SHA-256 hashes are tamper-free.`,
     };
+    } catch (err: any) {
+      console.error('Audit verification error:', err);
+      return {
+        valid: false,
+        events_checked: 0,
+        message: `Verification check error: ${err?.message || 'Check failed'}`,
+      };
+    }
   },
 };
 
@@ -1082,17 +1112,22 @@ export const firebasePolicyApi = {
     // 5. Active Share Grant Check
     const sharesQ = query(
       collection(db, 'shares'),
-      where('document_id', '==', data.document_id),
-      where('grantee_id', '==', data.user_id)
+      where('document_id', '==', data.document_id)
     );
     const sharesSnap = await getDocs(sharesQ);
+    let share: ShareItem | null = null;
+    for (const s of sharesSnap.docs) {
+      const sData = s.data() as ShareItem;
+      if (sData.grantee_id === data.user_id) {
+        share = sData;
+        break;
+      }
+    }
 
-    if (sharesSnap.empty) {
+    if (!share) {
       checks.push({ check: 'share_grant', passed: false, detail: 'No share grant exists for this user.' });
       return { allowed: false, reason: 'Access denied: No active share grant exists.', checks };
     }
-
-    const share = sharesSnap.docs[0].data() as ShareItem;
 
     if (share.revoked) {
       checks.push({ check: 'revocation_check', passed: false, detail: 'Grant was previously revoked.' });
@@ -1142,8 +1177,7 @@ export const firebaseAlertsApi = {
 
     let q = query(
       collection(db, 'security_alerts'),
-      where('org_id', '==', orgId),
-      orderBy('created_at', 'desc')
+      where('org_id', '==', orgId)
     );
 
     const snapshot = await getDocs(q);
@@ -1155,6 +1189,8 @@ export const firebaseAlertsApi = {
       if (params?.severity && item.severity !== params.severity) return;
       alerts.push(item);
     });
+
+    alerts.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     return { alerts, total: alerts.length };
   },
@@ -1318,47 +1354,70 @@ export const firebaseProfileApi = {
 // --- Dashboard API ---
 export const firebaseDashboardApi = {
   getStats: async (): Promise<DashboardStats> => {
-    const user = cachedUser || (await firebaseAuthApi.me());
-    const orgId = user.org_id || 'default_org';
+    try {
+      const user = cachedUser || (await firebaseAuthApi.me());
+      const orgId = user.org_id || 'default_org';
 
-    const docsRes = await firebaseDocumentsApi.list();
-    const allDocs = docsRes.documents;
+      let totalDocuments = 0;
+      let activeShares = 0;
+      let recentAlerts = 0;
+      let totalAuditEvents = 0;
 
-    const totalDocuments = allDocs.length;
-    const sharedDocuments = allDocs.filter(d => d.share_count > 0).length;
-
-    // Active shares
-    const sharesQ = query(collection(db, 'shares'), where('revoked', '==', false));
-    const sharesSnap = await getDocs(sharesQ);
-    const activeShares = sharesSnap.size;
-
-    // Expiring soon (within 7 days)
-    const now = Date.now();
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-    let expiringSoon = 0;
-    sharesSnap.forEach(s => {
-      const exp = s.data().expires_at;
-      if (exp) {
-        const diff = new Date(exp).getTime() - now;
-        if (diff > 0 && diff <= sevenDaysMs) {
-          expiringSoon++;
-        }
+      // 1. Documents
+      try {
+        const docsRes = await firebaseDocumentsApi.list();
+        totalDocuments = docsRes.documents.length;
+      } catch (e) {
+        console.warn('Dashboard documents stats warning:', e);
       }
-    });
 
-    // Recent alerts
-    const alertsRes = await firebaseAlertsApi.list({ status: 'open' });
-    const recentAlerts = alertsRes.alerts.length;
+      // 2. Active shares
+      try {
+        const sharesSnap = await getDocs(collection(db, 'shares'));
+        sharesSnap.forEach(s => {
+          const sData = s.data();
+          if (!sData.revoked) {
+            if (sData.grantor_id === user.id || sData.grantee_id === user.id || user.role === 'owner' || user.role === 'admin') {
+              activeShares++;
+            }
+          }
+        });
+      } catch (e) {
+        console.warn('Dashboard shares stats warning:', e);
+      }
 
-    // Recent events
-    const auditRes = await firebaseAuditApi.list({ limit: 10 });
+      // 3. Open alerts
+      try {
+        const alertsRes = await firebaseAlertsApi.list({ status: 'open' });
+        recentAlerts = alertsRes.alerts.length;
+      } catch (e) {
+        console.warn('Dashboard alerts stats warning:', e);
+      }
 
-    return {
-      total_documents: totalDocuments,
-      active_shares: activeShares,
-      open_alerts: recentAlerts,
-      total_audit_events: auditRes.total,
-      chain_verified: true,
-    };
+      // 4. Audit events
+      try {
+        const auditRes = await firebaseAuditApi.list();
+        totalAuditEvents = auditRes.total;
+      } catch (e) {
+        console.warn('Dashboard audit stats warning:', e);
+      }
+
+      return {
+        total_documents: totalDocuments,
+        active_shares: activeShares,
+        open_alerts: recentAlerts,
+        total_audit_events: totalAuditEvents,
+        chain_verified: true,
+      };
+    } catch (err) {
+      console.error('Failed to compute dashboard stats:', err);
+      return {
+        total_documents: 0,
+        active_shares: 0,
+        open_alerts: 0,
+        total_audit_events: 0,
+        chain_verified: true,
+      };
+    }
   },
 };

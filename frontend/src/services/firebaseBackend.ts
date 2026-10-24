@@ -529,7 +529,7 @@ export const firebaseDocumentsApi = {
     const now = new Date().toISOString();
 
     // Store metadata in Firestore
-    const docData: DocumentItem & { storage_path: string; deleted: boolean } = {
+    const docData: any = {
       id: docId,
       name: name.trim() || 'Untitled Document',
       content_type: file.type || 'application/octet-stream',
@@ -545,6 +545,11 @@ export const firebaseDocumentsApi = {
       permission: 'owner',
       deleted: false,
     };
+
+    // If payload is <= 700 KB, store ciphertext inline for instantaneous zero-latency retrieval
+    if (fileBuffer.byteLength <= 700 * 1024) {
+      docData.ciphertext_inline = bufferToBase64(fileBuffer);
+    }
 
     await setDoc(doc(db, 'documents', docId), docData);
 
@@ -755,11 +760,15 @@ export const firebaseDocumentsApi = {
       throw new Error('Cryptographic key envelope not found for your account.');
     }
 
-    // Download ciphertext directly from Firebase Cloud Storage with CDN acceleration
-    const storagePath = docData.storage_path || `documents/${docData.org_id}/${id}`;
-    const storageRef = ref(storage, storagePath);
-    const bytes = await downloadStorageBytes(storageRef);
-    const base64Content = bufferToBase64(bytes);
+    let base64Content = docData.ciphertext_inline;
+
+    if (!base64Content) {
+      // Download ciphertext directly from Firebase Cloud Storage with CDN acceleration
+      const storagePath = docData.storage_path || `documents/${docData.org_id}/${id}`;
+      const storageRef = ref(storage, storagePath);
+      const bytes = await downloadStorageBytes(storageRef);
+      base64Content = bufferToBase64(bytes);
+    }
 
     // Record audit event asynchronously (non-blocking) so document decryption is instant!
     recordAuditEvent(

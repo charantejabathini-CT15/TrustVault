@@ -19,6 +19,9 @@ import {
   RefreshCw,
   Eye,
   ExternalLink,
+  Maximize2,
+  Minimize2,
+  Shield,
 } from 'lucide-react';
 
 function detectFileType(buffer: ArrayBuffer, docName: string, docContentType?: string): {
@@ -109,6 +112,8 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const [error, setError] = useState('');
   const [integrityVerified, setIntegrityVerified] = useState(false);
 
+  const [isMaximized, setIsMaximized] = useState(false);
+
   useEffect(() => {
     if (isOpen && document) {
       handleDecrypt();
@@ -120,6 +125,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       }
       setIntegrityVerified(false);
       setError('');
+      setIsMaximized(false);
     }
   }, [isOpen, document]);
 
@@ -183,7 +189,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   };
 
   const handleDownload = async () => {
-    if (!document || !decryptedBlobUrl) return;
+    if (!document || !decryptedBlobUrl || !canDownload) return;
 
     // Trigger download of decrypted blob
     const a = window.document.createElement('a');
@@ -197,19 +203,33 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const canDownload = document.permission === 'download' || document.permission === 'owner';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-3xl p-6 rounded-2xl bg-[#0d1322] border border-[#1e2c4a] shadow-2xl text-slate-200 max-h-[90vh] flex flex-col">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-[#17233d] transition-colors"
-        >
-          <X className="w-5 h-5" />
-        </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+      <div
+        onContextMenu={(e) => { if (!canDownload) e.preventDefault(); }}
+        className={`relative w-full ${
+          isMaximized ? 'max-w-[98vw] h-[96vh]' : 'max-w-4xl max-h-[92vh]'
+        } p-5 sm:p-6 rounded-2xl bg-[#0d1322] border border-[#1e2c4a] shadow-2xl text-slate-200 flex flex-col transition-all duration-200`}
+      >
+        <div className="absolute top-4 right-4 flex items-center gap-1">
+          <button
+            onClick={() => setIsMaximized(!isMaximized)}
+            title={isMaximized ? 'Restore View' : 'Maximize Viewer'}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-[#17233d] transition-colors"
+          >
+            {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-[#17233d] transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-4 pb-4 border-b border-[#1e2c4a] pr-10">
+        <div className="flex items-center justify-between mb-4 pb-4 border-b border-[#1e2c4a] pr-16">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
               <Eye className="w-5 h-5" />
             </div>
             <div>
@@ -217,7 +237,9 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
                 <span>{(document.size / 1024).toFixed(1)} KB</span>
                 <span>•</span>
-                <span className="uppercase text-cyan-400 font-semibold">{document.permission} Access</span>
+                <span className={`uppercase font-semibold ${canDownload ? 'text-cyan-400' : 'text-amber-400'}`}>
+                  {document.permission === 'owner' ? 'Owner Access' : document.permission === 'download' ? 'Download & View Access' : 'View Only Access'}
+                </span>
                 {integrityVerified && (
                   <>
                     <span>•</span>
@@ -231,26 +253,33 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             </div>
           </div>
 
+          {/* Action buttons strictly gated by canDownload */}
           {decryptedBlobUrl && (
             <div className="flex items-center gap-2">
-              <a
-                href={decryptedBlobUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="py-2 px-3.5 rounded-xl bg-[#17233d] hover:bg-[#1e2c4a] border border-[#2b3c66] text-cyan-300 font-semibold text-xs transition-all flex items-center gap-1.5 shadow-sm"
-              >
-                <ExternalLink className="w-4 h-4" />
-                <span>Open in New Tab</span>
-              </a>
-
-              {canDownload && (
-                <button
-                  onClick={handleDownload}
-                  className="py-2 px-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-[#070b14] font-semibold text-xs transition-all flex items-center gap-1.5 shadow-md shadow-cyan-500/20"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download Decrypted</span>
-                </button>
+              {!canDownload ? (
+                <div className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-center gap-1.5 text-xs font-medium">
+                  <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>View Only (Download Blocked)</span>
+                </div>
+              ) : (
+                <>
+                  <a
+                    href={decryptedBlobUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-2 px-3.5 rounded-xl bg-[#17233d] hover:bg-[#1e2c4a] border border-[#2b3c66] text-cyan-300 font-semibold text-xs transition-all flex items-center gap-1.5 shadow-sm"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>Open in New Tab</span>
+                  </a>
+                  <button
+                    onClick={handleDownload}
+                    className="py-2 px-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-[#070b14] font-semibold text-xs transition-all flex items-center gap-1.5 shadow-md shadow-cyan-500/20"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download Decrypted</span>
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -288,40 +317,66 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
         {/* Preview Container */}
         {!loading && decryptedBlobUrl && (
-          <div className="flex-1 overflow-auto rounded-xl bg-[#070b14] border border-[#1e2c4a] p-3 text-xs font-mono text-slate-300 min-h-[460px] flex flex-col">
+          <div className="flex-1 overflow-auto rounded-xl bg-[#070b14] border border-[#1e2c4a] p-3 text-xs font-mono text-slate-300 min-h-[460px] flex flex-col relative select-none">
             {detectedType.isPdf ? (
               <div className="flex-1 w-full flex flex-col gap-2 min-h-[500px]">
                 <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#111a2e] text-xs font-sans text-slate-300 border border-[#1e2c4a]">
                   <span className="flex items-center gap-2 text-cyan-400 font-medium">
                     <FileText className="w-4 h-4" />
-                    PDF Document (Decrypted)
+                    PDF Document (Decrypted In-Memory)
                   </span>
-                  <a
-                    href={decryptedBlobUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2.5 py-1 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 flex items-center gap-1 font-semibold text-[11px]"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    Fullscreen View
-                  </a>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIsMaximized(!isMaximized)}
+                      className="px-2.5 py-1 rounded-md bg-[#17233d] hover:bg-[#1e2c4a] text-cyan-300 border border-[#2b3c66] flex items-center gap-1 font-semibold text-[11px] transition-colors"
+                    >
+                      {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                      <span>{isMaximized ? 'Restore View' : 'Maximize View'}</span>
+                    </button>
+                  </div>
                 </div>
-                <iframe
-                  src={decryptedBlobUrl}
-                  title={document.name}
-                  className="w-full flex-1 min-h-[460px] rounded-lg border border-[#1e2c4a] bg-slate-900"
-                />
+
+                <div className="relative flex-1 w-full min-h-[480px]">
+                  {/* If view-only, toolbar=0 instructs browser PDF viewer to suppress download/print buttons */}
+                  <iframe
+                    src={`${decryptedBlobUrl}#toolbar=${canDownload ? '1' : '0'}&navpanes=0`}
+                    title={document.name}
+                    className="w-full h-full min-h-[480px] rounded-lg border border-[#1e2c4a] bg-slate-900 select-none"
+                  />
+                  {!canDownload && (
+                    <div className="pointer-events-none absolute bottom-3 right-4 px-3 py-1 rounded-md bg-black/75 border border-amber-500/30 text-amber-300 text-[10px] font-sans flex items-center gap-1 shadow-lg">
+                      <Shield className="w-3 h-3 text-amber-400" />
+                      <span>Protected View Only • Export Prohibited</span>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : detectedType.isImage ? (
-              <div className="flex flex-col items-center justify-center p-4 gap-3 my-auto">
+              <div className="flex flex-col items-center justify-center p-4 gap-3 my-auto relative">
                 <img
                   src={decryptedBlobUrl}
                   alt={document.name}
-                  className="max-h-[60vh] max-w-full rounded-lg shadow-lg object-contain border border-[#1e2c4a]"
+                  draggable={false}
+                  className="max-h-[65vh] max-w-full rounded-lg shadow-lg object-contain border border-[#1e2c4a] select-none pointer-events-auto"
                 />
+                {!canDownload && (
+                  <div className="px-3 py-1 rounded-md bg-black/75 border border-amber-500/30 text-amber-300 text-[10px] font-sans flex items-center gap-1">
+                    <Shield className="w-3 h-3 text-amber-400" />
+                    <span>Protected Image • Saving Disabled</span>
+                  </div>
+                )}
               </div>
             ) : detectedType.isText && decryptedText !== null ? (
-              <pre className="whitespace-pre-wrap leading-relaxed font-mono p-3 bg-black/40 rounded-lg">{decryptedText}</pre>
+              <div className="relative flex-1 flex flex-col">
+                <pre className="whitespace-pre-wrap leading-relaxed font-mono p-4 bg-black/40 rounded-lg flex-1 select-text">
+                  {decryptedText}
+                </pre>
+                {!canDownload && (
+                  <div className="mt-2 text-right text-[10px] text-amber-400 font-sans">
+                    🔒 View-Only Mode: Clipboard export restricted by policy
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="p-8 text-center text-slate-400 font-sans space-y-4 my-auto">
                 <FileText className="w-14 h-14 mx-auto text-cyan-400" />
@@ -330,20 +385,20 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     {document.name} ({document.size} bytes)
                   </h4>
                   <p className="text-xs text-slate-400 mt-1">
-                    Binary file decrypted successfully in secure browser memory.
+                    File decrypted successfully in secure browser memory.
                   </p>
                 </div>
-                <div className="flex items-center justify-center gap-3 pt-2">
-                  <a
-                    href={decryptedBlobUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-4 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-semibold text-xs transition-colors flex items-center gap-1.5"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Open In Dedicated Browser Tab
-                  </a>
-                  {canDownload && (
+                {canDownload ? (
+                  <div className="flex items-center justify-center gap-3 pt-2">
+                    <a
+                      href={decryptedBlobUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-semibold text-xs transition-colors flex items-center gap-1.5"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      Open In Dedicated Browser Tab
+                    </a>
                     <button
                       onClick={handleDownload}
                       className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-[#070b14] font-semibold text-xs transition-all flex items-center gap-1.5"
@@ -351,8 +406,13 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                       <Download className="w-4 h-4" />
                       Save Locally
                     </button>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 max-w-md mx-auto text-amber-300 text-xs flex items-center gap-2 justify-center">
+                    <Shield className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>View-only policy enforced: Export, printing, and file extraction are blocked.</span>
+                  </div>
+                )}
               </div>
             )}
           </div>

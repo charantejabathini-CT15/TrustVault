@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from app.core.config import settings
+from app.core.security import verify_csrf_token
 from app.core.database import engine, Base
 from app.core.storage import ensure_bucket_exists
 from app.api.auth import router as auth_router
@@ -27,11 +28,13 @@ async def lifespan(app: FastAPI):
     logger.info("Creating database tables...")
     Base.metadata.create_all(bind=engine)
 
-    # Ensure MinIO bucket exists
+    # Verify configured object storage before accepting traffic.
     try:
         ensure_bucket_exists()
         logger.info("Storage bucket ready.")
     except Exception as e:
+        if settings.is_production:
+            raise
         logger.warning(f"Could not connect to object storage: {e}")
 
     logger.info("TrustVault backend started.")
@@ -69,6 +72,19 @@ async def security_headers(request: Request, call_next):
     if settings.is_production:
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     return response
+
+
+@app.middleware("http")
+async def csrf_protection(request: Request, call_next):
+    if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path not in (
+        "/api/auth/login",
+        "/api/auth/register",
+    ):
+        cookie_token = request.cookies.get("csrf_token", "")
+        header_token = request.headers.get("X-CSRF-Token", "")
+        if not verify_csrf_token(cookie_token, header_token):
+            return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
+    return await call_next(request)
 
 
 from fastapi import HTTPException

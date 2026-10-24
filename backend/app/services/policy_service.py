@@ -112,17 +112,20 @@ def evaluate_access(
         share_checks.append(PolicyCheck("share_not_revoked", True, "Grant is active"))
 
         # Check expiration
-        if share.expires_at and now >= share.expires_at:
+        expires_at = share.expires_at
+        if expires_at and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at and now >= expires_at:
             share_checks.append(PolicyCheck(
                 "share_not_expired", False,
-                f"Grant expired at {share.expires_at.isoformat()}"
+                f"Grant expired at {expires_at.isoformat()}"
             ))
             checks.extend(share_checks)
             continue
         if share.expires_at:
             share_checks.append(PolicyCheck(
                 "share_not_expired", True,
-                f"Expires at {share.expires_at.isoformat()}"
+                f"Expires at {expires_at.isoformat()}"
             ))
         else:
             share_checks.append(PolicyCheck("share_not_expired", True, "No expiration set"))

@@ -136,7 +136,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   const handleRevoke = async (shareId: string) => {
     try {
-      await documentsApi.revokeShare(shareId);
+      await documentsApi.revokeShare(documentId, shareId);
       loadData();
       onShareUpdated();
     } catch (err: any) {

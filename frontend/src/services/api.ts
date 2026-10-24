@@ -72,8 +72,8 @@ export const documentsApi = {
   createShare: (documentId: string, data: { grantee_email: string; permission: 'view' | 'download'; encrypted_key: string; expires_at?: string }) =>
     api.post<ShareItem>(`/documents/${documentId}/shares`, data).then(r => r.data),
 
-  revokeShare: (shareId: string) =>
-    api.delete(`/shares/${shareId}`).then(r => r.data),
+  revokeShare: (documentId: string, shareId: string) =>
+    api.delete(`/documents/${documentId}/shares/${shareId}`).then(r => r.data),
 };
 
 // --- Audit API ---

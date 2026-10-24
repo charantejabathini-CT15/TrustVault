@@ -18,6 +18,7 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 RUN echo 'server {' \
     '    listen 80;' \
     '    server_name localhost;' \
+    '    client_max_body_size 52m;' \
     '    location / {' \
     '        root /usr/share/nginx/html;' \
     '        index index.html index.htm;' \
@@ -28,6 +29,8 @@ RUN echo 'server {' \
     '        proxy_set_header Host $host;' \
     '        proxy_set_header X-Real-IP $remote_addr;' \
     '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
+    '        proxy_set_header X-Forwarded-Proto $scheme;' \
+    '        proxy_read_timeout 120s;' \
     '    }' \
     '}' > /etc/nginx/conf.d/default.conf
 

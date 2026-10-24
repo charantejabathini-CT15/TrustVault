@@ -22,6 +22,7 @@ frontend/.vite/
 .idea/
 *.swp
 *.swo
+.vercel/
 
 # OS
 .DS_Store
@@ -49,3 +50,5 @@ mysql_data/
 *.sqlite3
 backend/trustvault.db
 backend/data/
+
+.vercel

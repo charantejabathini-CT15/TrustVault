@@ -128,7 +128,7 @@ class DocumentShare(Base):
     grantor_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     grantee_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     permission = Column(Enum(SharePermission), nullable=False, default=SharePermission.VIEW)
-    expires_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     revoked = Column(Boolean, default=False, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now, nullable=False)

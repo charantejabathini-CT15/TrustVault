@@ -2,6 +2,7 @@
 
 import uuid
 import hashlib
+import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -23,6 +24,7 @@ from app.services.policy_service import evaluate_access
 from app.services.alert_service import evaluate_rules
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
+logger = logging.getLogger("trustvault.documents")
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
@@ -45,7 +47,10 @@ def _doc_to_response(doc: Document, db: Session, user_id: str) -> DocumentRespon
         ).first()
         if share:
             now = datetime.now(timezone.utc)
-            if not share.expires_at or now < share.expires_at:
+            expires_at = share.expires_at
+            if expires_at and expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if not expires_at or now < expires_at:
                 has_access = True
                 permission = share.permission.value
 
@@ -234,7 +239,7 @@ def get_document(
         active_share = next(
             (s for s in shares
              if s.grantee_id == user.id and not s.revoked
-             and (not s.expires_at or datetime.now(timezone.utc) < s.expires_at)),
+             and (not s.expires_at or datetime.now(timezone.utc) < (s.expires_at.replace(tzinfo=timezone.utc) if s.expires_at.tzinfo is None else s.expires_at))),
             None
         )
         if active_share:

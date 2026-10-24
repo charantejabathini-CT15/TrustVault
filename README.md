@@ -2,7 +2,7 @@
 
 > **Key Product Principle:** Every document has its own access policy, and every important access decision leaves verifiable evidence.
 
-TrustVault is a full-stack, enterprise-grade cybersecurity SaaS platform for confidential document sharing. It prevents unauthorized access and data leaks through **client-side zero-knowledge encryption**, **per-document granular policies**, **dynamic expiration & revocation**, and an **immutable, tamper-evident SHA-256 hash-chain audit trail**.
+TrustVault is a full-stack document-sharing application for confidential files. It combines **client-side zero-knowledge encryption**, **per-document access policies**, **expiration and revocation**, and a **tamper-evident SHA-256 hash-chain audit trail**.
 
 ---
 
@@ -89,9 +89,10 @@ Pre-seeded for instant demonstration and testing (all passwords: `DemoPass1`):
 
 TrustVault adheres to transparent cryptographic disclosures:
 1. **Post-Decryption Copies:** Once a recipient has decrypted a document, software cannot prevent screenshots, photography, or external distribution.
-2. **Revocation Limits:** Revoking a grant blocks future access requests; it cannot recall or erase previously downloaded plaintext copies.
-3. **Database Administrator Capabilities:** A database administrator with root access could alter both events and recompute hash chains. Checkpoint signatures and offsite audit exports are the mitigation for this threat.
-4. **Passphrase Irrecoverability:** Because TrustVault employs zero-knowledge encryption, losing the master vault passphrase means private keys cannot be recovered by server administrators.
+2. **View Permission:** A `view` grant controls which API access action is authorized; it cannot prevent a recipient from saving or copying plaintext after browser decryption.
+3. **Revocation Limits:** Revoking a grant blocks future access requests; it cannot recall or erase previously downloaded plaintext copies.
+4. **Database Administrator Capabilities:** A database administrator with root access could alter both events and recompute hash chains. Checkpoint signatures and offsite audit exports are the mitigation for this threat.
+5. **Passphrase Irrecoverability:** Because TrustVault employs zero-knowledge encryption, losing the master vault passphrase means private keys cannot be recovered by server administrators.
 
 ---
 
@@ -136,21 +137,35 @@ Open **`http://127.0.0.1:5173`** in your browser.
 
 ---
 
-### Option B: Docker Compose Setup
+### Option B: Docker Compose Deployment
+
+The Compose stack serves the built frontend through Nginx on port 8080 by default; the API, MySQL, and MinIO are private to the Compose network. Put a TLS reverse proxy in front of this port before exposing the service publicly. This setup uses MySQL and S3-compatible storage and deliberately refuses to start with development secrets or local storage fallback.
 
 ```bash
-# 1. Copy environment template
+# 1. Create deployment secrets and configure your public HTTPS origin in .env
 cp .env.example .env
+# Set CORS_ORIGINS=https://your-app.example.com, a unique SECRET_KEY (at least
+# 32 characters), strong database passwords, and non-default MINIO_ROOT_USER,
+# MINIO_ROOT_PASSWORD, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY values.
 
-# 2. Build and start all services (MySQL 8, MinIO, FastAPI Backend, React Frontend)
+# 2. Build and start MySQL, MinIO, FastAPI, and the production Nginx frontend
 docker compose up -d
 
-# 3. Seed demo data
-docker compose exec backend python seed.py
-
-# 4. View logs
+# 3. Check service logs
 docker compose logs -f
 ```
+
+Do not run `seed.py` on a public deployment: it creates known demo accounts. Configure TLS, backups, monitoring, and a managed secrets store at the hosting layer. The bundled MinIO service is a convenient single-host option, not a substitute for a managed, replicated object store in a high-availability deployment.
+
+### Option C: Vercel Frontend
+
+Vercel hosts the React frontend; the FastAPI backend, MySQL database, and S3-compatible storage must already be reachable over HTTPS from a separate host. Import this repository into Vercel with the repository root as the project root, then set the `API_ORIGIN` environment variable for Production and Preview to the backend's HTTPS origin (for example, `https://api.example.com`, with no trailing slash). The Vercel rewrite proxies `/api/*` to that origin so browser requests and session cookies remain same-origin. Configure the backend with `ENVIRONMENT=production`, durable database/object storage, and the required non-default secrets before publishing. Never expose the backend directly without TLS or use demo seed accounts in production.
+
+### Option D: Free-Tier Backend Prototype
+
+The root `render.yaml` defines a free Render Python API service. Before creating it, create a Supabase free project and enable Supabase Storage's S3 protocol. Create the `trustvault-documents` bucket in Storage, then generate server-side S3 access keys. During Render Blueprint setup, provide `DATABASE_URL_OVERRIDE` (use the Supabase TLS connection string), `S3_ENDPOINT_URL` (`https://<project-ref>.storage.supabase.co/storage/v1/s3`), `S3_BUCKET`, `S3_REGION` (the region shown in the Supabase S3 settings), `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` when prompted. Keep credentials in provider dashboards, never in Git. After Render deploys, add its `onrender.com` URL as Vercel's `API_ORIGIN` Production environment variable and redeploy the Vercel frontend.
+
+This is a hobby prototype configuration, not production hosting: Render's free API sleeps after inactivity and has ephemeral local storage; Supabase's free project can pause after inactivity and has limited database and storage quotas. Review current plan limits and export/back up important data independently. Do not use this setup for critical documents.
 
 ---
 
@@ -198,11 +213,15 @@ Builds cleanly with zero TypeScript or Vite errors.
 | `MYSQL_DATABASE` | Database name | `trustvault` |
 | `MYSQL_USER` | Database username | `trustvault` |
 | `MYSQL_PASSWORD` | Database password | `dev_password_123` |
+| `DATABASE_URL_OVERRIDE` | Optional managed database URL; PostgreSQL must use `sslmode=require` | empty |
 | `USE_SQLITE` | Enable zero-config SQLite | `false` (auto-falls back if MySQL down) |
 | `SECRET_KEY` | HMAC signing key for sessions | Secure random string |
 | `SESSION_EXPIRY_HOURS` | Session cookie validity | `24` |
 | `MINIO_ENDPOINT` | S3/MinIO endpoint | `localhost:9000` / `minio:9000` |
 | `MINIO_BUCKET` | S3 document bucket | `trustvault-documents` |
+| `S3_ENDPOINT_URL` | Full HTTPS endpoint for compatible storage such as Supabase Storage | empty |
+| `S3_BUCKET` | S3 bucket override | empty |
+| `S3_REGION` | S3 request-signing region from the storage provider | `auto` |
 | `AWS_ACCESS_KEY_ID` | Storage access key | `minioadmin` |
 | `AWS_SECRET_ACCESS_KEY` | Storage secret key | `minioadmin123` |
 | `STORAGE_TYPE` | Storage driver (`s3`, `local`, `auto`) | `auto` |

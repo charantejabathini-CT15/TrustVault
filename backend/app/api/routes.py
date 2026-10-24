@@ -227,6 +227,7 @@ def update_alert(
     request: Request,
     user: User = Depends(get_current_user),
     org_id: str = Depends(get_current_org_id),
+    membership=Depends(require_role(OrgRole.OWNER, OrgRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
     """Update alert status (acknowledge, resolve, dismiss)."""

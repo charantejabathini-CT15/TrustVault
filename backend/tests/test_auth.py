@@ -78,7 +78,12 @@ def test_login_success_and_logout(client):
     assert me_res.json()["email"] == "loginuser@example.com"
 
     # Logout
-    logout_res = client.post("/api/auth/logout", cookies=login_res.cookies)
+    csrf_token = login_res.cookies.get("csrf_token")
+    logout_res = client.post(
+        "/api/auth/logout",
+        cookies=login_res.cookies,
+        headers={"X-CSRF-Token": csrf_token},
+    )
     assert logout_res.status_code == 200
 
     # Access /me after logout fails
@@ -100,3 +105,18 @@ def test_login_invalid_password(client):
         "password": "WrongPassword123!",
     })
     assert login_res.status_code == 401
+
+
+def test_state_changing_request_requires_csrf_token(client):
+    response = client.post("/api/auth/logout")
+    assert response.status_code == 403
+    assert response.json()["detail"] == "CSRF validation failed"
+
+
+def test_state_changing_request_rejects_mismatched_csrf_token(client):
+    response = client.post(
+        "/api/auth/logout",
+        cookies={"csrf_token": "cookie-token"},
+        headers={"X-CSRF-Token": "different-token"},
+    )
+    assert response.status_code == 403

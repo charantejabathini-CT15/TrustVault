@@ -126,6 +126,7 @@ TrustVault/
 |-- start-dev.ps1                        # PowerShell development launcher
 |-- docker-compose.yml                   # Container stack (MySQL, MinIO, Backend, Frontend)
 |-- package.json                         # Workspace scripts
+|-- prompt.md                            # System prompt & cryptographic engineering spec
 |-- .env.example                         # Sanitized environment variable template
 |
 +-- frontend/                            # React 18 + TypeScript Client Application

@@ -18,6 +18,7 @@ import {
   getDoc,
   getDocs,
   updateDoc as rawUpdateDoc,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -207,27 +208,45 @@ async function getCurrentUserFromFirestore(fbUser: FirebaseUser): Promise<User> 
     return cachedUser;
   }
 
-  // If user doc doesn't exist yet, auto-create initial profile
-  const orgId = generateUUID();
-  const orgName = `${fbUser.displayName || 'Personal'} Vault`;
+  // Check if an invited profile already exists for this email
+  const userEmail = (fbUser.email || '').toLowerCase().trim();
+  let invitedData: any = null;
+  let oldInviteId: string | null = null;
+
+  if (userEmail) {
+    const inviteQ = query(collection(db, 'users'), where('email', '==', userEmail));
+    const inviteSnap = await getDocs(inviteQ);
+    for (const d of inviteSnap.docs) {
+      if (d.id !== fbUser.uid) {
+        invitedData = d.data();
+        oldInviteId = d.id;
+        break;
+      }
+    }
+  }
+
+  const orgId = invitedData?.org_id || generateUUID();
+  const orgName = invitedData?.org_name || `${fbUser.displayName || 'Personal'} Vault`;
+  const role = invitedData?.role || 'owner';
 
   const newProfile = {
     id: fbUser.uid,
     email: fbUser.email || '',
-    display_name: fbUser.displayName || 'User',
+    display_name: fbUser.displayName || invitedData?.display_name || 'User',
     org_id: orgId,
     org_name: orgName,
-    role: 'owner',
+    role: role,
     has_keys: false,
     created_at: Timestamp.now(),
   };
 
-  await setDoc(userDocRef, newProfile);
-  await setDoc(doc(db, 'organizations', orgId), {
-    id: orgId,
-    name: orgName,
-    created_at: Timestamp.now(),
-  });
+  await setDoc(userDocRef, newProfile, { merge: true });
+
+  if (oldInviteId) {
+    try {
+      await deleteDoc(doc(db, 'users', oldInviteId));
+    } catch {}
+  }
 
   cachedUser = {
     id: fbUser.uid,
@@ -235,7 +254,7 @@ async function getCurrentUserFromFirestore(fbUser: FirebaseUser): Promise<User> 
     display_name: newProfile.display_name,
     org_id: orgId,
     org_name: orgName,
-    role: 'owner',
+    role: role,
     has_keys: false,
   };
 
@@ -266,14 +285,31 @@ export const firebaseAuthApi = {
 
     const userDocRef = doc(db, 'users', fbUser.uid);
     const existingDoc = await getDoc(userDocRef);
-    let orgId = generateUUID();
-    let orgName = data.org_name;
+
+    // Check if an invited profile already exists for this email
+    const userEmail = data.email.toLowerCase().trim();
+    let invitedData: any = null;
+    let oldInviteId: string | null = null;
+    const inviteQ = query(collection(db, 'users'), where('email', '==', userEmail));
+    const inviteSnap = await getDocs(inviteQ);
+    for (const d of inviteSnap.docs) {
+      if (d.id !== fbUser.uid) {
+        invitedData = d.data();
+        oldInviteId = d.id;
+        break;
+      }
+    }
+
+    let orgId = invitedData?.org_id || generateUUID();
+    let orgName = invitedData?.org_name || data.org_name;
+    let role = invitedData?.role || 'owner';
     let hasKeys = false;
 
     if (existingDoc.exists()) {
       const exData = existingDoc.data();
       if (exData.org_id) orgId = exData.org_id;
       if (exData.org_name) orgName = exData.org_name;
+      if (exData.role) role = exData.role;
       hasKeys = Boolean(exData.public_key && exData.encrypted_private_key);
     }
 
@@ -291,12 +327,18 @@ export const firebaseAuthApi = {
       display_name: data.display_name,
       org_id: orgId,
       org_name: orgName,
-      role: 'owner',
+      role: role,
       has_keys: hasKeys,
       created_at: Timestamp.now(),
     };
 
     await setDoc(userDocRef, userProfile, { merge: true });
+
+    if (oldInviteId) {
+      try {
+        await deleteDoc(doc(db, 'users', oldInviteId));
+      } catch {}
+    }
 
     // Add membership
     await setDoc(doc(db, 'org_memberships', `${orgId}_${fbUser.uid}`), {
@@ -1105,6 +1147,7 @@ export const firebaseTeamApi = {
         display_name: data.display_name || data.email,
         role: data.role || 'member',
         joined_at: data.created_at?.toDate ? data.created_at.toDate().toISOString() : new Date().toISOString(),
+        has_keys: Boolean(data.public_key && data.encrypted_private_key),
       });
     });
 

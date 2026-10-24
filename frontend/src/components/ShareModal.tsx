@@ -211,7 +211,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               >
                 {members.map((m) => (
                   <option key={m.id} value={m.email} className="bg-[#111a2e] text-slate-100">
-                    {m.display_name} ({m.email}) — {m.role}
+                    {m.display_name} ({m.email}) — {m.role} {m.has_keys === false ? '⚠️ (Needs Vault Setup)' : '🔒 (Keys Ready)'}
                   </option>
                 ))}
               </select>
@@ -221,6 +221,25 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               </div>
             )}
           </div>
+
+          {/* Warning when selected recipient has not generated keys yet */}
+          {(() => {
+            const currentRecipient = members.find((m) => m.email === selectedEmail);
+            if (currentRecipient && currentRecipient.has_keys === false) {
+              return (
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-2.5 text-xs text-amber-300">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                  <div>
+                    <span className="font-semibold text-amber-200">{currentRecipient.display_name}</span> has not initialized their cryptographic vault keys yet.
+                    <p className="mt-1 text-slate-300 leading-relaxed">
+                      In zero-knowledge architecture, you cannot share an encrypted file with someone until they sign in at least once to generate their RSA public key. Ask {currentRecipient.display_name} to log in to TrustVault.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -256,10 +275,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
           <button
             type="submit"
-            disabled={loading || !selectedEmail || !isVaultUnlocked || members.length === 0}
+            disabled={
+              loading ||
+              !selectedEmail ||
+              !isVaultUnlocked ||
+              members.length === 0 ||
+              members.find((m) => m.email === selectedEmail)?.has_keys === false
+            }
             className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 disabled:opacity-50 text-[#070b14] font-semibold text-sm transition-all flex items-center justify-center gap-2"
           >
-            {loading ? 'Re-wrapping Key & Granting Access...' : 'Create Encrypted Share Grant'}
+            {loading
+              ? 'Re-wrapping Key & Granting Access...'
+              : members.find((m) => m.email === selectedEmail)?.has_keys === false
+              ? 'Recipient Must Initialize Vault First'
+              : 'Create Encrypted Share Grant'}
           </button>
         </form>
 

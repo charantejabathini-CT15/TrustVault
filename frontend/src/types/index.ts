@@ -111,6 +111,7 @@ export interface OrgMemberItem {
   display_name: string;
   role: 'owner' | 'admin' | 'member' | 'auditor';
   joined_at: string;
+  has_keys?: boolean;
 }
 
 export interface DashboardStats {

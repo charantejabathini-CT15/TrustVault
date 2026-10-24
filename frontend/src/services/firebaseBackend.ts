@@ -14,10 +14,10 @@ import {
 import {
   collection,
   doc,
-  setDoc,
+  setDoc as rawSetDoc,
   getDoc,
   getDocs,
-  updateDoc,
+  updateDoc as rawUpdateDoc,
   query,
   where,
   orderBy,
@@ -25,6 +25,7 @@ import {
   Timestamp,
   increment,
   runTransaction,
+  type SetOptions,
 } from 'firebase/firestore';
 import {
   ref,
@@ -76,6 +77,48 @@ function generateUUID(): string {
   });
 }
 
+// --- Firestore Safety Sanitizer ---
+/**
+ * Recursively remove undefined values from an object or array so Firestore does not reject it.
+ * In Firestore, undefined values are forbidden; properties with undefined values must either be
+ * omitted or set to null. Omitting them is standard Firestore practice.
+ */
+function sanitizeForFirestore<T>(data: T): T {
+  if (data === undefined) {
+    return null as any;
+  }
+  if (data === null || typeof data !== 'object') {
+    return data;
+  }
+  if (
+    data instanceof Date ||
+    (data as any) instanceof Timestamp ||
+    typeof (data as any).isEqual === 'function' ||
+    '_methodName' in (data as any)
+  ) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeForFirestore(item)) as any;
+  }
+  const result: Record<string, any> = {};
+  for (const [key, val] of Object.entries(data as Record<string, any>)) {
+    if (val !== undefined) {
+      result[key] = sanitizeForFirestore(val);
+    }
+  }
+  return result as T;
+}
+
+const setDoc = (ref: any, data: any, options?: SetOptions) => {
+  const sanitized = sanitizeForFirestore(data);
+  return options ? rawSetDoc(ref, sanitized, options) : rawSetDoc(ref, sanitized);
+};
+
+const updateDoc = (ref: any, data: any) => {
+  return rawUpdateDoc(ref, sanitizeForFirestore(data));
+};
+
 // --- Audit Hash-Chain Engine ---
 async function recordAuditEvent(
   orgId: string,
@@ -110,23 +153,24 @@ async function recordAuditEvent(
   const canonical = `${newSequence}:${orgId}:${actorId || ''}:${documentId || ''}:${action}:${result}:${isoTime}`;
   const eventHash = await sha256Hex(previousHash + canonical);
 
-  const eventItem: AuditEventItem = {
+  const eventItem: Record<string, any> = {
     id: newSequence,
     org_id: orgId,
-    actor_id: actorId,
-    actor_email: actorEmail,
-    actor_name: actorName,
-    document_id: documentId,
-    document_name: documentName,
     action,
     result,
-    metadata_json: metadata,
     request_id: generateUUID(),
     previous_hash: previousHash,
     event_hash: eventHash,
     sequence_number: newSequence,
     created_at: isoTime,
   };
+
+  if (actorId) eventItem.actor_id = actorId;
+  if (actorEmail) eventItem.actor_email = actorEmail;
+  if (actorName) eventItem.actor_name = actorName;
+  if (documentId) eventItem.document_id = documentId;
+  if (documentName) eventItem.document_name = documentName;
+  if (metadata) eventItem.metadata_json = metadata;
 
   const eventDocRef = doc(db, 'audit_events', `${orgId}_${newSequence}`);
   await setDoc(eventDocRef, eventItem);
@@ -139,7 +183,7 @@ async function recordAuditEvent(
     updated_at: Timestamp.now(),
   });
 
-  return eventItem;
+  return eventItem as AuditEventItem;
 }
 
 // --- Current User State Cache ---
@@ -201,33 +245,58 @@ async function getCurrentUserFromFirestore(fbUser: FirebaseUser): Promise<User> 
 // --- Auth API ---
 export const firebaseAuthApi = {
   register: async (data: { email: string; password: string; display_name: string; org_name: string }): Promise<User> => {
-    const cred = await createUserWithEmailAndPassword(auth, data.email, data.password);
-    const fbUser = cred.user;
+    let fbUser: FirebaseUser;
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, data.email, data.password);
+      fbUser = cred.user;
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') {
+        const cred = await signInWithEmailAndPassword(auth, data.email, data.password);
+        fbUser = cred.user;
+      } else {
+        throw err;
+      }
+    }
 
-    await firebaseUpdateProfile(fbUser, { displayName: data.display_name });
+    try {
+      await firebaseUpdateProfile(fbUser, { displayName: data.display_name });
+    } catch {
+      // Non-fatal
+    }
 
-    const orgId = generateUUID();
     const userDocRef = doc(db, 'users', fbUser.uid);
+    const existingDoc = await getDoc(userDocRef);
+    let orgId = generateUUID();
+    let orgName = data.org_name;
+    let hasKeys = false;
+
+    if (existingDoc.exists()) {
+      const exData = existingDoc.data();
+      if (exData.org_id) orgId = exData.org_id;
+      if (exData.org_name) orgName = exData.org_name;
+      hasKeys = Boolean(exData.public_key && exData.encrypted_private_key);
+    }
+
     const orgDocRef = doc(db, 'organizations', orgId);
 
     await setDoc(orgDocRef, {
       id: orgId,
-      name: data.org_name,
+      name: orgName,
       created_at: Timestamp.now(),
-    });
+    }, { merge: true });
 
     const userProfile = {
       id: fbUser.uid,
       email: data.email,
       display_name: data.display_name,
       org_id: orgId,
-      org_name: data.org_name,
+      org_name: orgName,
       role: 'owner',
-      has_keys: false,
+      has_keys: hasKeys,
       created_at: Timestamp.now(),
     };
 
-    await setDoc(userDocRef, userProfile);
+    await setDoc(userDocRef, userProfile, { merge: true });
 
     // Add membership
     await setDoc(doc(db, 'org_memberships', `${orgId}_${fbUser.uid}`), {
@@ -238,29 +307,33 @@ export const firebaseAuthApi = {
       display_name: data.display_name,
       email: data.email,
       created_at: Timestamp.now(),
-    });
+    }, { merge: true });
 
     // Record audit event
-    await recordAuditEvent(
-      orgId,
-      'user_registered',
-      'success',
-      fbUser.uid,
-      data.email,
-      data.display_name,
-      undefined,
-      undefined,
-      { email: data.email }
-    );
+    try {
+      await recordAuditEvent(
+        orgId,
+        'user_registered',
+        'success',
+        fbUser.uid,
+        data.email,
+        data.display_name,
+        undefined,
+        undefined,
+        { email: data.email }
+      );
+    } catch (auditErr) {
+      console.warn('Audit record warning on registration:', auditErr);
+    }
 
     cachedUser = {
       id: fbUser.uid,
       email: data.email,
       display_name: data.display_name,
       org_id: orgId,
-      org_name: data.org_name,
+      org_name: orgName,
       role: 'owner',
-      has_keys: false,
+      has_keys: hasKeys,
     };
 
     return cachedUser;

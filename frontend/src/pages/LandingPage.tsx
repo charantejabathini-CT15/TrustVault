@@ -31,15 +31,36 @@ export const LandingPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#070b14] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black">
-      {/* Top Banner Navigation */}
+      {/* Top Banner with Creator Attribution */}
+      <div className="w-full bg-gradient-to-r from-[#070b14] via-[#0f172a] to-[#070b14] border-b border-cyan-500/20 py-2.5 px-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2 shadow-sm">
+        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span>Created & Developed by</span>
+        <span className="text-cyan-400 font-bold tracking-wide hover:text-cyan-300 transition-colors">
+          Charan Teja Bathini
+        </span>
+        <span className="text-slate-600 hidden sm:inline">•</span>
+        <span className="text-slate-300 hidden sm:inline">Zero-Knowledge Cryptographic Vault</span>
+      </div>
+
+      {/* Top Navigation */}
       <header className="h-20 border-b border-[#1e2c4a]/80 bg-[#070b14]/80 backdrop-blur-md px-6 md:px-12 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-teal-400 flex items-center justify-center shadow-lg shadow-cyan-500/20">
             <Shield className="w-6 h-6 text-[#070b14]" />
           </div>
-          <span className="font-bold text-xl tracking-tight bg-gradient-to-r from-white via-slate-200 to-cyan-400 bg-clip-text text-transparent">
-            TrustVault
-          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-xl tracking-tight bg-gradient-to-r from-white via-slate-200 to-cyan-400 bg-clip-text text-transparent">
+                TrustVault
+              </span>
+              <span className="hidden sm:inline-block text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+                Zero Knowledge
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-400">
+              Created by <span className="text-cyan-400 font-semibold">Charan Teja Bathini</span>
+            </div>
+          </div>
         </div>
 
         <div className="flex items-center gap-4">
@@ -76,9 +97,11 @@ export const LandingPage: React.FC = () => {
           <div className="w-[600px] h-[350px] bg-gradient-to-tr from-cyan-500/10 via-teal-500/5 to-transparent blur-3xl rounded-full"></div>
         </div>
 
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-950/60 border border-cyan-800/60 text-xs font-semibold text-cyan-400 mb-8 shadow-sm">
-          <Shield className="w-3.5 h-3.5" />
-          <span>Zero-Knowledge Document Sharing & Cryptographic Audit Trails</span>
+        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-950/70 border border-cyan-800/80 text-xs font-semibold text-cyan-400 mb-8 shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>Created by <strong className="text-white font-bold">Charan Teja Bathini</strong></span>
+          <span className="text-cyan-700 hidden sm:inline">•</span>
+          <span className="text-slate-300 hidden sm:inline">Zero-Knowledge Document Security</span>
         </div>
 
         <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold tracking-tight text-white mb-6 leading-tight">
@@ -237,10 +260,12 @@ export const LandingPage: React.FC = () => {
       </section>
 
       {/* Footer */}
-      <footer className="mt-auto border-t border-[#1e2c4a]/80 py-8 px-6 text-center text-xs text-slate-500">
-        <p>TrustVault — Secure Document Sharing with Verifiable Audit Trail.</p>
-        <p className="mt-1 text-[11px] text-slate-600">
-          Powered by FastAPI, SQLAlchemy 2, Argon2id, and Web Crypto API.
+      <footer className="mt-auto border-t border-[#1e2c4a]/80 py-8 px-6 text-center text-xs text-slate-400">
+        <p className="font-medium text-slate-300">
+          TrustVault — Zero-Knowledge Secure Document Sharing with Verifiable Audit Trail.
+        </p>
+        <p className="mt-2 text-xs">
+          Created by <span className="text-cyan-400 font-bold tracking-wide">Charan Teja Bathini</span>
         </p>
       </footer>
     </div>

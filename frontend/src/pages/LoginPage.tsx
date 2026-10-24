@@ -42,6 +42,9 @@ export const LoginPage: React.FC = () => {
           <p className="text-xs text-slate-400 mt-1">
             Zero-knowledge authentication and encrypted session
           </p>
+          <div className="mt-2 text-[11px] text-slate-400">
+            Created by <span className="text-cyan-400 font-semibold">Charan Teja Bathini</span>
+          </div>
         </div>
 
         {error && (

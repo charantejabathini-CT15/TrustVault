@@ -18,7 +18,69 @@ import {
   X,
   RefreshCw,
   Eye,
+  ExternalLink,
 } from 'lucide-react';
+
+function detectFileType(buffer: ArrayBuffer, docName: string, docContentType?: string): {
+  isPdf: boolean;
+  isImage: boolean;
+  isText: boolean;
+  mimeType: string;
+} {
+  const bytes = new Uint8Array(buffer);
+  const name = (docName || '').toLowerCase();
+  const declaredType = (docContentType || '').toLowerCase();
+
+  // 1. PDF detection (Magic header: %PDF -> 0x25 0x50 0x44 0x46)
+  const isPdf =
+    declaredType === 'application/pdf' ||
+    name.endsWith('.pdf') ||
+    (bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46);
+
+  if (isPdf) {
+    return { isPdf: true, isImage: false, isText: false, mimeType: 'application/pdf' };
+  }
+
+  // 2. Image detection
+  const isPng = bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  const isJpg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const isGif = bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46;
+  const isWebp =
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50;
+
+  const isImage = isPng || isJpg || isGif || isWebp || declaredType.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
+  if (isImage) {
+    const mime = isPng ? 'image/png' : isJpg ? 'image/jpeg' : isGif ? 'image/gif' : isWebp ? 'image/webp' : (declaredType || 'image/png');
+    return { isPdf: false, isImage: true, isText: false, mimeType: mime };
+  }
+
+  // 3. Text detection: try decoding as UTF-8
+  try {
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    let hasNull = false;
+    const sampleLen = Math.min(bytes.length, 4096);
+    for (let i = 0; i < sampleLen; i++) {
+      if (bytes[i] === 0) {
+        hasNull = true;
+        break;
+      }
+    }
+    if (!hasNull) {
+      decoder.decode(bytes.subarray(0, sampleLen));
+      return { isPdf: false, isImage: false, isText: true, mimeType: 'text/plain' };
+    }
+  } catch {}
+
+  return { isPdf: false, isImage: false, isText: false, mimeType: declaredType || 'application/octet-stream' };
+}
 
 interface DocumentPreviewModalProps {
   isOpen: boolean;
@@ -36,6 +98,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const { isVaultUnlocked, unlockedPrivateKey } = useAuth();
   const [decryptedText, setDecryptedText] = useState<string | null>(null);
   const [decryptedBlobUrl, setDecryptedBlobUrl] = useState<string | null>(null);
+  const [detectedType, setDetectedType] = useState<{ isPdf: boolean; isImage: boolean; isText: boolean; mimeType: string }>({
+    isPdf: false,
+    isImage: false,
+    isText: false,
+    mimeType: '',
+  });
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [error, setError] = useState('');
@@ -86,30 +154,21 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       setStatusMsg('Decrypting content locally in browser memory...');
       const decryptedBuffer = await decryptFileBytes(ciphertextBuffer, aesKey);
 
-      // Determine how to present based on content type
-      const contentType = document.content_type || 'application/octet-stream';
-      const isText = contentType.startsWith('text/') ||
-        contentType.includes('json') ||
-        contentType.includes('yaml') ||
-        contentType.includes('javascript') ||
-        contentType.includes('typescript') ||
-        contentType.includes('markdown') ||
-        document.name.endsWith('.txt') ||
-        document.name.endsWith('.md') ||
-        document.name.endsWith('.json') ||
-        document.name.endsWith('.py') ||
-        document.name.endsWith('.ts');
+      // Deep inspection of decrypted buffer with magic byte header inspection
+      const fileType = detectFileType(decryptedBuffer, document.name, document.content_type);
+      setDetectedType(fileType);
 
-      const isImage = contentType.startsWith('image/');
-      const isPdf = contentType === 'application/pdf' || document.name.endsWith('.pdf');
-
-      const blob = new Blob([decryptedBuffer], { type: contentType });
+      const blob = new Blob([decryptedBuffer], { type: fileType.mimeType });
       const blobUrl = URL.createObjectURL(blob);
       setDecryptedBlobUrl(blobUrl);
 
-      if (isText) {
-        const text = new TextDecoder('utf-8').decode(decryptedBuffer);
-        setDecryptedText(text);
+      if (fileType.isText) {
+        try {
+          const text = new TextDecoder('utf-8').decode(decryptedBuffer);
+          setDecryptedText(text);
+        } catch {
+          setDecryptedText(null);
+        }
       } else {
         setDecryptedText(null);
       }
@@ -172,14 +231,28 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             </div>
           </div>
 
-          {canDownload && decryptedBlobUrl && (
-            <button
-              onClick={handleDownload}
-              className="py-2 px-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-[#070b14] font-semibold text-xs transition-all flex items-center gap-1.5 shadow-md shadow-cyan-500/20"
-            >
-              <Download className="w-4 h-4" />
-              <span>Download Decrypted</span>
-            </button>
+          {decryptedBlobUrl && (
+            <div className="flex items-center gap-2">
+              <a
+                href={decryptedBlobUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2 px-3.5 rounded-xl bg-[#17233d] hover:bg-[#1e2c4a] border border-[#2b3c66] text-cyan-300 font-semibold text-xs transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>Open in New Tab</span>
+              </a>
+
+              {canDownload && (
+                <button
+                  onClick={handleDownload}
+                  className="py-2 px-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-[#070b14] font-semibold text-xs transition-all flex items-center gap-1.5 shadow-md shadow-cyan-500/20"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Decrypted</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -215,30 +288,71 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
         {/* Preview Container */}
         {!loading && decryptedBlobUrl && (
-          <div className="flex-1 overflow-auto rounded-xl bg-[#070b14] border border-[#1e2c4a] p-4 text-xs font-mono text-slate-300">
-            {decryptedText !== null ? (
-              <pre className="whitespace-pre-wrap leading-relaxed">{decryptedText}</pre>
-            ) : document.content_type?.startsWith('image/') ? (
-              <div className="flex justify-center p-4">
-                <img src={decryptedBlobUrl} alt={document.name} className="max-h-[60vh] rounded-lg shadow-lg" />
+          <div className="flex-1 overflow-auto rounded-xl bg-[#070b14] border border-[#1e2c4a] p-3 text-xs font-mono text-slate-300 min-h-[460px] flex flex-col">
+            {detectedType.isPdf ? (
+              <div className="flex-1 w-full flex flex-col gap-2 min-h-[500px]">
+                <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#111a2e] text-xs font-sans text-slate-300 border border-[#1e2c4a]">
+                  <span className="flex items-center gap-2 text-cyan-400 font-medium">
+                    <FileText className="w-4 h-4" />
+                    PDF Document (Decrypted)
+                  </span>
+                  <a
+                    href={decryptedBlobUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 flex items-center gap-1 font-semibold text-[11px]"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Fullscreen View
+                  </a>
+                </div>
+                <iframe
+                  src={decryptedBlobUrl}
+                  title={document.name}
+                  className="w-full flex-1 min-h-[460px] rounded-lg border border-[#1e2c4a] bg-slate-900"
+                />
               </div>
-            ) : document.name.endsWith('.pdf') ? (
-              <iframe src={decryptedBlobUrl} title={document.name} className="w-full h-[60vh] rounded-lg border-0" />
+            ) : detectedType.isImage ? (
+              <div className="flex flex-col items-center justify-center p-4 gap-3 my-auto">
+                <img
+                  src={decryptedBlobUrl}
+                  alt={document.name}
+                  className="max-h-[60vh] max-w-full rounded-lg shadow-lg object-contain border border-[#1e2c4a]"
+                />
+              </div>
+            ) : detectedType.isText && decryptedText !== null ? (
+              <pre className="whitespace-pre-wrap leading-relaxed font-mono p-3 bg-black/40 rounded-lg">{decryptedText}</pre>
             ) : (
-              <div className="p-8 text-center text-slate-400 font-sans space-y-3">
-                <FileText className="w-12 h-12 mx-auto text-slate-500" />
-                <p className="text-sm font-medium text-slate-300">
-                  Binary file decrypted successfully in browser memory ({document.size} bytes).
-                </p>
-                {canDownload ? (
-                  <p className="text-xs text-slate-500">
-                    Click the "Download Decrypted" button above to save the file locally.
+              <div className="p-8 text-center text-slate-400 font-sans space-y-4 my-auto">
+                <FileText className="w-14 h-14 mx-auto text-cyan-400" />
+                <div>
+                  <h4 className="text-base font-semibold text-white">
+                    {document.name} ({document.size} bytes)
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Binary file decrypted successfully in secure browser memory.
                   </p>
-                ) : (
-                  <p className="text-xs text-amber-400">
-                    Your permission grant is restricted to in-browser viewing only.
-                  </p>
-                )}
+                </div>
+                <div className="flex items-center justify-center gap-3 pt-2">
+                  <a
+                    href={decryptedBlobUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-semibold text-xs transition-colors flex items-center gap-1.5"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Open In Dedicated Browser Tab
+                  </a>
+                  {canDownload && (
+                    <button
+                      onClick={handleDownload}
+                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-[#070b14] font-semibold text-xs transition-all flex items-center gap-1.5"
+                    >
+                      <Download className="w-4 h-4" />
+                      Save Locally
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>

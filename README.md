@@ -161,13 +161,15 @@ Do not run `seed.py` on a public deployment: it creates known demo accounts. Con
 
 Vercel hosts the React frontend; the FastAPI backend, MySQL database, and S3-compatible storage must already be reachable over HTTPS from a separate host. Import this repository into Vercel with the repository root as the project root, then set the `API_ORIGIN` environment variable for Production and Preview to the backend's HTTPS origin (for example, `https://api.example.com`, with no trailing slash). The Vercel rewrite proxies `/api/*` to that origin so browser requests and session cookies remain same-origin. Configure the backend with `ENVIRONMENT=production`, durable database/object storage, and the required non-default secrets before publishing. Never expose the backend directly without TLS or use demo seed accounts in production.
 
-### Option D: Free-Tier Backend Prototype
+### Option D: Firebase Hosting and Cloud Run
 
-Northflank's free Sandbox includes up to $20/month of resource usage and does not sleep. A small 0.5-vCPU/1-GB API service is listed at about $12/month, within that included allowance. Northflank's docs require adding a payment method before creating resources, even on the free plan; monitor usage and do not exceed the included allowance. In Northflank, connect this GitHub repository and `main`, then add a Docker service using `backend/Dockerfile` with `backend` as its build context. Expose port 8000.
+Firebase Hosting serves the built React frontend, while a Cloud Run service runs the FastAPI container and Cloud SQL for PostgreSQL stores relational data. Firebase Hosting rewrites `/api/**` to the Cloud Run service so session and CSRF cookies stay same-origin. Cloud Storage for Firebase stores encrypted document objects using the Firebase Admin SDK.
 
-Before deploying, create a Supabase free project and enable Supabase Storage's S3 protocol. Create the private `trustvault-documents` bucket and generate server-side S3 access keys. Set the following runtime secrets/variables on the Northflank service: `DATABASE_URL_OVERRIDE` (use Supabase's TLS connection string; choose the session pooler if the host requires IPv4), `S3_ENDPOINT_URL` (`https://<project-ref>.storage.supabase.co/storage/v1/s3`), `S3_BUCKET`, `S3_REGION` (the region shown in Supabase S3 settings), `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SECRET_KEY` (unique random value), `ENVIRONMENT=production`, `STORAGE_TYPE=s3`, and `CORS_ORIGINS=https://trust-vault-coral-three.vercel.app`. Keep credentials in provider secret settings, never in Git. After Northflank provides the service's HTTPS URL, set Vercel's Production `API_ORIGIN` to that origin and redeploy the frontend.
+The root `.firebaserc` selects project `trustvault-pvt`; `firebase.json` hosts `frontend/dist` and rewrites API requests to Cloud Run service `trustvault-api` in `asia-south1`. Create a Cloud SQL PostgreSQL instance in `asia-south1` and a database/user. Store the database URL and a generated `SECRET_KEY` in Secret Manager. The database URL should use the Cloud Run Unix socket form `postgresql+psycopg://USER:PASSWORD@/DATABASE?host=/cloudsql/PROJECT:REGION:INSTANCE`; attach the instance to Cloud Run and grant the runtime service account Cloud SQL Client plus Firebase Storage object access.
 
-This is a hobby prototype configuration, not production hosting: the Northflank service consumes the free monthly allowance, and Supabase's free project can pause and has limited database/storage quotas. Confirm the current allowance in your Northflank dashboard before creating resources. Review provider limits and export/back up important data independently. Do not use this setup for critical documents.
+Deploy the backend container from `backend/` to Cloud Run on port 8000 with runtime settings `ENVIRONMENT=production`, `STORAGE_TYPE=firebase`, `FIREBASE_PROJECT_ID=trustvault-pvt`, `FIREBASE_STORAGE_BUCKET=trustvault-pvt.firebasestorage.app`, and `CORS_ORIGINS=https://trustvault-pvt.web.app` (also include the `firebaseapp.com` origin if used). Point `DATABASE_URL_OVERRIDE` and `SECRET_KEY` at Secret Manager versions. Build the frontend with `npm --prefix frontend run build`, then deploy Hosting with `firebase deploy --only hosting`. Never commit service-account keys or database credentials.
+
+Firebase Hosting has a no-cost quota, but Cloud Run and Cloud SQL require Blaze billing and Cloud SQL incurs charges; Firebase Storage can also incur charges over quota. This is not a guaranteed $0 deployment. Add budget alerts and review the estimate before creating Cloud SQL resources. The free Firebase Hosting quota is 10 GB stored and 10 GB/month transfer; verify current usage in the Firebase console.
 
 ---
 
@@ -215,7 +217,9 @@ Builds cleanly with zero TypeScript or Vite errors.
 | `MYSQL_DATABASE` | Database name | `trustvault` |
 | `MYSQL_USER` | Database username | `trustvault` |
 | `MYSQL_PASSWORD` | Database password | `dev_password_123` |
-| `DATABASE_URL_OVERRIDE` | Optional managed database URL; PostgreSQL must use `sslmode=require` | empty |
+| `DATABASE_URL_OVERRIDE` | Optional managed database URL; use TLS for TCP or Cloud Run's `/cloudsql/...` socket | empty |
+| `FIREBASE_PROJECT_ID` | Firebase project used by the Admin SDK | `trustvault-pvt` |
+| `FIREBASE_STORAGE_BUCKET` | Firebase Storage bucket name | `trustvault-pvt.firebasestorage.app` |
 | `USE_SQLITE` | Enable zero-config SQLite | `false` (auto-falls back if MySQL down) |
 | `SECRET_KEY` | HMAC signing key for sessions | Secure random string |
 | `SESSION_EXPIRY_HOURS` | Session cookie validity | `24` |
@@ -226,4 +230,4 @@ Builds cleanly with zero TypeScript or Vite errors.
 | `S3_REGION` | S3 request-signing region from the storage provider | `auto` |
 | `AWS_ACCESS_KEY_ID` | Storage access key | `minioadmin` |
 | `AWS_SECRET_ACCESS_KEY` | Storage secret key | `minioadmin123` |
-| `STORAGE_TYPE` | Storage driver (`s3`, `local`, `auto`) | `auto` |
+| `STORAGE_TYPE` | Storage driver (`firebase`, `s3`, `local`, `auto`) | `auto` |

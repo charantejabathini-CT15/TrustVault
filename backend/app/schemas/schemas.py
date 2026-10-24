@@ -94,6 +94,23 @@ class DocumentListResponse(BaseModel):
     total: int
 
 
+class PrepareDocumentUploadRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=500)
+    content_type: Optional[str] = None
+    size: int = Field(..., gt=0, le=50 * 1024 * 1024)
+    encrypted_file_hash: str = Field(..., pattern=r"^[a-fA-F0-9]{64}$")
+    encrypted_key: str = Field(..., min_length=1)
+
+
+class PrepareDocumentUploadResponse(BaseModel):
+    document_id: str
+    upload_url: str
+
+
+class CompleteDocumentUploadRequest(PrepareDocumentUploadRequest):
+    document_id: str
+
+
 # --- Share Schemas ---
 
 class CreateShareRequest(BaseModel):

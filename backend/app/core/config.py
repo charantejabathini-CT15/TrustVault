@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
+from sqlalchemy.engine import make_url
 from typing import List
 
 # Find .env file in root or backend
@@ -28,8 +29,13 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
     ENVIRONMENT: str = "development"
 
+    # Firebase
+    FIREBASE_PROJECT_ID: str = "trustvault-pvt"
+    FIREBASE_STORAGE_BUCKET: str = "trustvault-pvt.firebasestorage.app"
+    FIREBASE_SERVICE_ACCOUNT_EMAIL: str = ""
+
     # Storage
-    STORAGE_TYPE: str = "auto"  # "s3", "local", or "auto" (attempts S3 then falls back to local)
+    STORAGE_TYPE: str = "auto"  # "firebase", "s3", "local", or "auto"
     LOCAL_STORAGE_DIR: str = str(ROOT_DIR / "backend" / "data" / "storage")
     S3_ENDPOINT_URL: str = ""
     S3_BUCKET: str = ""
@@ -71,26 +77,35 @@ class Settings(BaseSettings):
 
         if len(self.SECRET_KEY) < 32 or self.SECRET_KEY.startswith("dev_secret_key"):
             raise ValueError("Production requires a unique SECRET_KEY of at least 32 characters")
-        if self.STORAGE_TYPE != "s3":
-            raise ValueError("Production requires STORAGE_TYPE=s3; local fallback is disabled")
-        database_url = self.DATABASE_URL.lower()
-        if database_url.startswith("sqlite") or not self.DATABASE_URL_OVERRIDE:
+        if self.STORAGE_TYPE not in ("firebase", "s3"):
+            raise ValueError("Production requires Firebase Storage or S3; local storage is disabled")
+        if not self.DATABASE_URL_OVERRIDE:
             raise ValueError("Production requires DATABASE_URL_OVERRIDE for a durable database")
-        if database_url.startswith(("postgresql://", "postgres://", "postgresql+psycopg://")):
-            if not any(mode in database_url for mode in ("sslmode=require", "sslmode=verify-ca", "sslmode=verify-full")):
+        parsed_database_url = make_url(self.DATABASE_URL)
+        drivername = parsed_database_url.drivername.lower()
+        if drivername.startswith("sqlite"):
+            raise ValueError("Production requires a durable PostgreSQL or MySQL database")
+        if drivername.startswith("postgresql") or drivername == "postgres":
+            sslmode = str(parsed_database_url.query.get("sslmode", "")).lower()
+            socket_host = str(parsed_database_url.query.get("host", ""))
+            if sslmode not in ("require", "verify-ca", "verify-full") and not socket_host.startswith("/cloudsql/"):
                 raise ValueError("Production PostgreSQL connections must require TLS")
-        elif database_url.startswith("mysql"):
+        elif drivername.startswith("mysql"):
             if not self.MYSQL_PASSWORD or not self.MYSQL_SSL_CA:
                 raise ValueError("Production MySQL requires MYSQL_PASSWORD and MYSQL_SSL_CA")
         else:
             raise ValueError("Production database must use PostgreSQL or MySQL")
-        if self.AWS_ACCESS_KEY_ID == "minioadmin" or self.AWS_SECRET_ACCESS_KEY == "minioadmin123":
-            raise ValueError("Production requires non-default object-storage credentials")
-        endpoint = self.S3_ENDPOINT_URL or f"{'https' if self.MINIO_USE_SSL else 'http'}://{self.MINIO_ENDPOINT}"
-        if not endpoint.startswith("https://") or "localhost" in endpoint or "127.0.0.1" in endpoint:
-            raise ValueError("Production requires a remote HTTPS S3 endpoint")
-        if not (self.S3_BUCKET or self.MINIO_BUCKET):
-            raise ValueError("Production requires an S3 bucket")
+        if self.STORAGE_TYPE == "firebase":
+            if not self.FIREBASE_PROJECT_ID or not self.FIREBASE_STORAGE_BUCKET:
+                raise ValueError("Production Firebase Storage requires project ID and bucket")
+        else:
+            if self.AWS_ACCESS_KEY_ID == "minioadmin" or self.AWS_SECRET_ACCESS_KEY == "minioadmin123":
+                raise ValueError("Production requires non-default object-storage credentials")
+            endpoint = self.S3_ENDPOINT_URL or f"{'https' if self.MINIO_USE_SSL else 'http'}://{self.MINIO_ENDPOINT}"
+            if not endpoint.startswith("https://") or "localhost" in endpoint or "127.0.0.1" in endpoint:
+                raise ValueError("Production requires a remote HTTPS S3 endpoint")
+            if not (self.S3_BUCKET or self.MINIO_BUCKET):
+                raise ValueError("Production requires an S3 bucket")
         if not self.cors_origins_list or any(not origin.startswith("https://") for origin in self.cors_origins_list):
             raise ValueError("Production CORS_ORIGINS must contain only HTTPS origins")
         return self

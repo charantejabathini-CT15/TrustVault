@@ -2,9 +2,8 @@
 
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Response, Request
-from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import FirestoreStore, get_db
 from app.core.security import hash_password, verify_password, create_session_token, generate_csrf_token
 from app.core.config import settings
 from app.models.models import User, Organization, OrgMembership, OrgRole
@@ -17,10 +16,10 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 
 @router.post("/register", response_model=AuthResponse)
-def register(req: RegisterRequest, response: Response, db: Session = Depends(get_db)):
+def register(req: RegisterRequest, response: Response, db: FirestoreStore = Depends(get_db)):
     """Register a new user and create an organization."""
     # Check if email is already taken
-    existing = db.query(User).filter(User.email == req.email).first()
+    existing = db.first(User, {"email": req.email})
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
@@ -35,7 +34,6 @@ def register(req: RegisterRequest, response: Response, db: Session = Depends(get
         password_hash=pw_hash,
     )
     db.add(user)
-    db.flush()
 
     # Create organization
     org = Organization(
@@ -43,7 +41,6 @@ def register(req: RegisterRequest, response: Response, db: Session = Depends(get
         name=req.org_name,
     )
     db.add(org)
-    db.flush()
 
     # Create owner membership
     membership = OrgMembership(
@@ -97,7 +94,7 @@ def register(req: RegisterRequest, response: Response, db: Session = Depends(get
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(req: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+def login(req: LoginRequest, request: Request, response: Response, db: FirestoreStore = Depends(get_db)):
     """Authenticate user and create session."""
     # Rate limiting
     limit_key = f"login:{req.email}"
@@ -109,22 +106,20 @@ def login(req: LoginRequest, request: Request, response: Response, db: Session =
         )
 
     # Find user
-    user = db.query(User).filter(User.email == req.email).first()
+    user = db.first(User, {"email": req.email})
     if not user or not verify_password(req.password, user.password_hash):
         login_limiter.record(limit_key)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     # Get org membership
-    membership = db.query(OrgMembership).filter(
-        OrgMembership.user_id == user.id
-    ).first()
+    membership = db.first(OrgMembership, {"user_id": user.id})
 
     org_id = membership.org_id if membership else None
     org_name = None
     role = None
 
     if membership:
-        org = db.query(Organization).filter(Organization.id == membership.org_id).first()
+        org = db.get(Organization, membership.org_id)
         org_name = org.name if org else None
         role = membership.role.value
 
@@ -173,7 +168,7 @@ def logout(
     response: Response,
     request: Request,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: FirestoreStore = Depends(get_db),
 ):
     """Log out the current user."""
     org_id = getattr(request.state, "org_id", None)
@@ -190,7 +185,7 @@ def logout(
 def get_me(
     request: Request,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: FirestoreStore = Depends(get_db),
 ):
     """Get the current authenticated user's info."""
     org_id = getattr(request.state, "org_id", None)
@@ -198,12 +193,9 @@ def get_me(
     role = None
 
     if org_id:
-        membership = db.query(OrgMembership).filter(
-            OrgMembership.user_id == user.id,
-            OrgMembership.org_id == org_id,
-        ).first()
+        membership = db.first(OrgMembership, {"user_id": user.id, "org_id": org_id})
         if membership:
-            org = db.query(Organization).filter(Organization.id == org_id).first()
+            org = db.get(Organization, org_id)
             org_name = org.name if org else None
             role = membership.role.value
 

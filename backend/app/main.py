@@ -8,7 +8,6 @@ import logging
 
 from app.core.config import settings
 from app.core.security import verify_csrf_token
-from app.core.database import engine, Base
 from app.core.storage import ensure_bucket_exists
 from app.api.auth import router as auth_router
 from app.api.documents import router as documents_router
@@ -24,11 +23,7 @@ logger = logging.getLogger("trustvault")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown events."""
-    # Create tables
-    logger.info("Creating database tables...")
-    Base.metadata.create_all(bind=engine)
-
-    # Verify configured object storage before accepting traffic.
+    # Verify configured storage before accepting traffic. Firestore creates documents on demand.
     try:
         ensure_bucket_exists()
         logger.info("Storage bucket ready.")

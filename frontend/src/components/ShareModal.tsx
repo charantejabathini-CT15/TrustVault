@@ -136,11 +136,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   const handleRevoke = async (shareId: string) => {
     try {
-      await documentsApi.revokeShare(documentId, shareId);
+      await documentsApi.revokeShare(shareId);
       loadData();
       onShareUpdated();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Failed to revoke access');
+      setError(err?.response?.data?.detail || err?.message || 'Failed to revoke access');
     }
   };
 

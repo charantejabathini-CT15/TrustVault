@@ -1,13 +1,17 @@
 """Storage client supporting S3/MinIO with automatic local filesystem fallback."""
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 from typing import Optional
 import boto3
+import google.auth
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from google.auth.transport.requests import Request as GoogleAuthRequest
 
 from app.core.config import settings
+from app.core.firebase import get_storage_bucket
 
 logger = logging.getLogger("trustvault.storage")
 
@@ -47,6 +51,47 @@ def _bucket_name() -> str:
     return settings.S3_BUCKET or settings.MINIO_BUCKET
 
 
+def _firebase_signing_identity():
+    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/devstorage.read_write"])
+    if not credentials.valid:
+        credentials.refresh(GoogleAuthRequest())
+    service_account_email = settings.FIREBASE_SERVICE_ACCOUNT_EMAIL or getattr(
+        credentials, "service_account_email", None
+    )
+    if not service_account_email:
+        raise RuntimeError("Firebase signed URLs require FIREBASE_SERVICE_ACCOUNT_EMAIL")
+    return service_account_email, credentials.token
+
+
+def create_upload_url(storage_key: str, content_type: str) -> str:
+    if settings.STORAGE_TYPE != "firebase":
+        raise RuntimeError("Signed Firebase uploads are only enabled with Firebase Storage")
+    service_account_email, access_token = _firebase_signing_identity()
+    return get_storage_bucket().blob(storage_key).generate_signed_url(
+        version="v4",
+        expiration=timedelta(minutes=15),
+        method="PUT",
+        content_type=content_type,
+        service_account_email=service_account_email,
+        access_token=access_token,
+        scheme="https",
+    )
+
+
+def create_download_url(storage_key: str) -> str:
+    if settings.STORAGE_TYPE != "firebase":
+        raise RuntimeError("Signed Firebase downloads are only enabled with Firebase Storage")
+    service_account_email, access_token = _firebase_signing_identity()
+    return get_storage_bucket().blob(storage_key).generate_signed_url(
+        version="v4",
+        expiration=timedelta(minutes=5),
+        method="GET",
+        service_account_email=service_account_email,
+        access_token=access_token,
+        scheme="https",
+    )
+
+
 def _use_local_storage() -> bool:
     return settings.STORAGE_TYPE == "local" or (not settings.is_production and _s3_available is False)
 
@@ -61,6 +106,16 @@ def ensure_bucket_exists():
         _s3_available = False
         Path(settings.LOCAL_STORAGE_DIR).mkdir(parents=True, exist_ok=True)
         logger.info(f"Using local filesystem storage at: {settings.LOCAL_STORAGE_DIR}")
+        return
+
+    if settings.STORAGE_TYPE == "firebase":
+        try:
+            get_storage_bucket().reload()
+            logger.info("Firebase Storage bucket ready.")
+        except Exception as e:
+            if settings.is_production:
+                raise RuntimeError("Firebase Storage bucket is unavailable") from e
+            logger.warning(f"Firebase Storage unavailable: {e}")
         return
 
     try:
@@ -87,6 +142,11 @@ def ensure_bucket_exists():
 def upload_file(storage_key: str, data: bytes, content_type: str = "application/octet-stream"):
     """Upload encrypted file data to object storage, or fall back to local disk storage."""
     global _s3_available
+    if settings.STORAGE_TYPE == "firebase":
+        blob = get_storage_bucket().blob(storage_key)
+        blob.upload_from_string(data, content_type=content_type)
+        return
+
     if _s3_available is None:
         ensure_bucket_exists()
 
@@ -120,6 +180,12 @@ def upload_file(storage_key: str, data: bytes, content_type: str = "application/
 def download_file(storage_key: str) -> bytes:
     """Download encrypted file data from local disk or object storage."""
     global _s3_available
+    if settings.STORAGE_TYPE == "firebase":
+        try:
+            return get_storage_bucket().blob(storage_key).download_as_bytes()
+        except Exception as e:
+            raise FileNotFoundError(f"Storage key '{storage_key}' was not found in Firebase Storage.") from e
+
     if _use_local_storage():
         local_path = _get_local_storage_path(storage_key)
         if local_path.is_file():
@@ -141,6 +207,12 @@ def download_file(storage_key: str) -> bytes:
 
 def delete_file(storage_key: str):
     """Delete a file from storage."""
+    if settings.STORAGE_TYPE == "firebase":
+        blob = get_storage_bucket().blob(storage_key)
+        if blob.exists():
+            blob.delete()
+        return
+
     if _use_local_storage():
         local_path = _get_local_storage_path(storage_key)
         if not local_path.is_file():

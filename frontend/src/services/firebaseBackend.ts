@@ -32,6 +32,8 @@ import {
   ref,
   uploadBytes,
   getBytes,
+  getBlob,
+  getDownloadURL,
   deleteObject,
 } from 'firebase/storage';
 import { auth, db, storage } from './firebase';
@@ -58,12 +60,43 @@ async function sha256Hex(text: string): Promise<string> {
 }
 
 function bufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
-  const bytes = new Uint8Array(buffer);
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as any);
   }
   return btoa(binary);
+}
+
+// Multi-strategy high-speed binary download helper
+async function downloadStorageBytes(storageRef: any): Promise<Uint8Array> {
+  // Strategy 1: Direct CDN fetch via signed downloadURL (Fastest - standard browser streaming)
+  try {
+    const downloadUrl = await getDownloadURL(storageRef);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(downloadUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const buf = await res.arrayBuffer();
+      return new Uint8Array(buf);
+    }
+  } catch (err) {
+    console.warn('Fast direct CDN fetch bypassed, trying getBlob:', err);
+  }
+
+  // Strategy 2: Firebase Storage getBlob
+  try {
+    const blob = await getBlob(storageRef);
+    const buf = await blob.arrayBuffer();
+    return new Uint8Array(buf);
+  } catch (err) {
+    console.warn('getBlob bypassed, trying getBytes:', err);
+  }
+
+  // Strategy 3: Fallback getBytes (max 50 MB)
+  return new Uint8Array(await getBytes(storageRef, 50 * 1024 * 1024));
 }
 
 // Generate standard UUID
@@ -722,14 +755,14 @@ export const firebaseDocumentsApi = {
       throw new Error('Cryptographic key envelope not found for your account.');
     }
 
-    // Download ciphertext directly from Firebase Cloud Storage
+    // Download ciphertext directly from Firebase Cloud Storage with CDN acceleration
     const storagePath = docData.storage_path || `documents/${docData.org_id}/${id}`;
     const storageRef = ref(storage, storagePath);
-    const bytes = await getBytes(storageRef);
+    const bytes = await downloadStorageBytes(storageRef);
     const base64Content = bufferToBase64(bytes);
 
-    // Record audit event
-    await recordAuditEvent(
+    // Record audit event asynchronously (non-blocking) so document decryption is instant!
+    recordAuditEvent(
       docData.org_id,
       action === 'download' ? 'document_download' : 'document_access',
       'success',
@@ -738,7 +771,7 @@ export const firebaseDocumentsApi = {
       user.display_name,
       id,
       docData.name
-    );
+    ).catch(err => console.warn('Background audit warning:', err));
 
     return {
       encrypted_content: base64Content,
